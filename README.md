@@ -80,3 +80,11 @@ uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
    Mindshare 타깃을 주기적으로 동기화하려면 `python scripts/mindshare_sync.py`를 실행하세요. 실행 후 어드민 보드가 자동으로 갱신됩니다.
 8. Collect research tweets for qualitative analysis with `python scripts/collect_posts.py`; captured posts are stored in `research_posts` for further study.  
    정성 분석용으로 `python scripts/collect_posts.py`를 실행하면 최신 트윗이 `research_posts` 테이블에 저장됩니다.
+
+## GitHub Publishing / 깃허브 업로드
+1. `git remote add origin git@github.com:<USER>/<REPO>.git`으로 원격 저장소를 연결합니다.  
+   `git remote add origin git@github.com:<사용자>/<레포>.git` 명령으로 원격을 추가하세요.
+2. 기본 브랜치를 `main`으로 고정합니다: `git branch -M main`.  
+   `git branch -M main`을 한 번 실행해 기본 브랜치를 통일합니다.
+3. 첫 푸시는 `git push -u origin main`으로 진행하고, 이후에는 `git push`만으로 동기화할 수 있습니다.  
+   초기에 `git push -u origin main`을 수행하면 이후엔 `git push`만으로도 깃허브와 동기화됩니다.
