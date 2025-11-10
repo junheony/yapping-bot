@@ -1,0 +1,46 @@
+{% set item = item %}
+<article class="phone-card" id="queue-card-{{ item.hash }}">
+  <header class="phone-card__header">
+    <div>
+      <h3>{{ item.title }}</h3>
+      <p class="meta">{{ item.source_type or "webhook" }} · {{ item.tags|join(", ") if item.tags else "no tags" }}</p>
+    </div>
+    <div class="phone-card__badges">
+      <span class="badge">{{ item.status }}</span>
+      {% if item.manual_review_required %}
+        <span class="badge badge-warn">manual / 수동</span>
+      {% endif %}
+    </div>
+  </header>
+  <section class="phone-card__body">
+    <p class="meta">
+      Queued: {{ item.queued_at or "n/a" }} · Tries: {{ item.attempt_count }} · Priority: {{ item.priority }}
+    </p>
+  </section>
+  <footer class="phone-card__footer">
+    <form
+      class="inline-form"
+      hx-post="/admin/queue/{{ item.hash }}/approve"
+      hx-target="#queue-card-{{ item.hash }}"
+      hx-swap="outerHTML"
+    >
+      <button type="submit" class="btn btn-primary">Approve &amp; Post / 승인·게시</button>
+    </form>
+    <form
+      class="inline-form"
+      hx-post="/admin/queue/{{ item.hash }}/approve?process_immediately=false"
+      hx-target="#queue-card-{{ item.hash }}"
+      hx-swap="outerHTML"
+    >
+      <button type="submit" class="btn">Approve Only / 승인만</button>
+    </form>
+    <form
+      class="inline-form"
+      hx-post="/admin/queue/{{ item.hash }}/skip"
+      hx-target="#queue-card-{{ item.hash }}"
+      hx-swap="outerHTML"
+    >
+      <button type="submit" class="btn btn-warn">Skip / 건너뛰기</button>
+    </form>
+  </footer>
+</article>

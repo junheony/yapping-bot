@@ -1,0 +1,43 @@
+<div class="log-stack">
+  {% if engagement_logs %}
+    {% for log in engagement_logs %}
+      <article class="log-card log-card--engagement">
+        <header class="log-card__header">
+          <span class="log-card__time">{{ log.at }}</span>
+          <div class="log-card__chips">
+            <span class="badge badge--event">{{ log.event }}</span>
+            <span class="badge badge--action">{{ log.action }}</span>
+          </div>
+        </header>
+        <div class="log-card__body">
+          <div class="log-card__row">
+            <span class="log-card__label">Tweet</span>
+            {% if log.tweet_url %}
+              <a href="{{ log.tweet_url }}" target="_blank" rel="noopener" class="link-muted">{{ log.tweet_id }}</a>
+            {% else %}
+              <span class="log-card__value">{{ log.tweet_id or "—" }}</span>
+            {% endif %}
+          </div>
+          {% if log.author %}
+            <div class="log-card__row">
+              <span class="log-card__label">Author</span>
+              <span class="log-card__value">@{{ log.author }}</span>
+            </div>
+          {% endif %}
+          <p class="log-card__detail">{{ log.detail or "No details" }}</p>
+          {% if log.reason %}
+            <div class="reason-tags">
+              {% for token in log.reason.split('|') if token %}
+                <span class="badge badge--reason">{{ token }}</span>
+              {% endfor %}
+            </div>
+          {% endif %}
+        </div>
+      </article>
+    {% endfor %}
+  {% else %}
+    <div class="log-card log-card--empty">
+      <p>No engagement logs yet / 아직 상호작용 로그가 없습니다</p>
+    </div>
+  {% endif %}
+</div>

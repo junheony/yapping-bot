@@ -1,0 +1,119 @@
+{% set source_labels = {
+  "gomtu_lb_stats": "Gomtu · Insights",
+  "gomtu_top_yappers": "Gomtu · Top Yappers",
+  "kaito_supabase": "Kaito · Leaderboard",
+  "kaito_targets": "Kaito · Targets",
+  "kaito": "Kaito · Legacy"
+} %}
+
+{% if mindshare_targets %}
+  {% set total = mindshare_targets | length %}
+  {% set inner_targets = mindshare_targets | selectattr('inner_circle') | list %}
+  {% set inner_count = inner_targets | length %}
+  {% set top_targets = mindshare_targets[:12] %}
+  {% set rest_targets = mindshare_targets[12:] %}
+
+  <div class="mindshare-summary">
+    <span class="badge badge--summary">Total {{ total }}</span>
+    <span class="badge badge-inner">Inner Circle {{ inner_count }}</span>
+    {% if total > 0 %}
+      <span class="badge badge--summary badge--summary-gold">Top {{ [total, 12] | min }}</span>
+    {% endif %}
+  </div>
+
+  <div class="mindshare-grid mindshare-grid--highlight">
+    {% for target in top_targets %}
+      {% set stats = target.stats or {} %}
+      {% set supabase = stats.supabase if stats.supabase is defined else None %}
+      {% set insight = stats.insight if stats.insight is defined else None %}
+      {% if stats.projects is defined %}
+        {% set projects = stats.projects %}
+      {% elif stats.target_user_projects is defined %}
+        {% set projects = stats.target_user_projects %}
+      {% else %}
+        {% set projects = [] %}
+      {% endif %}
+      {% set podium_class = 'mindshare-card--podium-' ~ loop.index if loop.index <= 3 else '' %}
+      <article class="mindshare-card mindshare-card--highlight {{ podium_class }}{% if target.inner_circle %} mindshare-card--inner{% endif %}">
+        <header class="mindshare-card__header">
+          <div>
+            <h3>{{ target.display_name or target.handle }}</h3>
+            <p class="meta">@{{ target.handle }} · {{ source_labels.get(target.source, target.source) }}</p>
+          </div>
+          <div class="mindshare-card__badges">
+            {% if target.rank %}<span class="badge">#{{ target.rank }}</span>{% endif %}
+            {% if target.topic %}<span class="badge">{{ target.topic }}</span>{% endif %}
+            {% if target.inner_circle %}<span class="badge badge-inner">Inner Circle</span>{% endif %}
+          </div>
+        </header>
+        <section class="mindshare-card__body">
+          {% if supabase %}
+            <p class="meta">Mindshare {{ supabase.mindshare | default(target.score, true) | default('-', true) }} · Smart Followers {{ supabase.smart_followers | default('-', true) }}</p>
+            <p class="meta">Followers {{ supabase.real_followers | default('-', true) }} · Snapshot {{ supabase.fetch_timestamp | default('-', true) }}</p>
+          {% elif insight %}
+            <p class="meta">Mindshare {{ insight.mindshare_sum | default(target.score, true) | default('-', true) }} · Smart Followers {{ insight.smart_follower_sum | default('-', true) }}</p>
+            <p class="meta">Yaps 7D {{ insight.yaps_7d_sum | default('-', true) }} · 30D {{ insight.yaps_30d_sum | default('-', true) }}</p>
+          {% elif projects %}
+            <p class="meta">
+              {% for item in projects[:2] %}
+                {{ item.project }} (7D {{ item.get("7D") | default('-', true) }}, 30D {{ item.get("30D") | default('-', true) }}){% if not loop.last %} · {% endif %}
+              {% endfor %}
+            </p>
+          {% endif %}
+          <p class="meta">Last seen {{ target.last_seen_at }}</p>
+        </section>
+      </article>
+    {% endfor %}
+  </div>
+
+  {% if rest_targets %}
+    <details class="mindshare-collapsible">
+      <summary>Show remaining {{ rest_targets | length }} targets / 나머지 보기</summary>
+      <div class="mindshare-grid mindshare-grid--list">
+        {% for target in rest_targets %}
+          {% set stats = target.stats or {} %}
+          {% set supabase = stats.supabase if stats.supabase is defined else None %}
+          {% set insight = stats.insight if stats.insight is defined else None %}
+          {% if stats.projects is defined %}
+            {% set projects = stats.projects %}
+          {% elif stats.target_user_projects is defined %}
+            {% set projects = stats.target_user_projects %}
+          {% else %}
+            {% set projects = [] %}
+          {% endif %}
+          <article class="mindshare-card{% if target.inner_circle %} mindshare-card--inner{% endif %}">
+            <header class="mindshare-card__header">
+              <div>
+                <h3>{{ target.display_name or target.handle }}</h3>
+                <p class="meta">@{{ target.handle }} · {{ source_labels.get(target.source, target.source) }}</p>
+              </div>
+              <div class="mindshare-card__badges">
+                {% if target.rank %}<span class="badge">#{{ target.rank }}</span>{% endif %}
+                {% if target.topic %}<span class="badge">{{ target.topic }}</span>{% endif %}
+                {% if target.inner_circle %}<span class="badge badge-inner">Inner Circle</span>{% endif %}
+              </div>
+            </header>
+            <section class="mindshare-card__body">
+              {% if supabase %}
+                <p class="meta">Mindshare {{ supabase.mindshare | default(target.score, true) | default('-', true) }} · Smart Followers {{ supabase.smart_followers | default('-', true) }}</p>
+              {% elif insight %}
+                <p class="meta">Mindshare {{ insight.mindshare_sum | default(target.score, true) | default('-', true) }} · Smart Followers {{ insight.smart_follower_sum | default('-', true) }}</p>
+              {% elif projects %}
+                <p class="meta">
+                  {% for item in projects[:2] %}
+                    {{ item.project }} (7D {{ item.get("7D") | default('-', true) }}, 30D {{ item.get("30D") | default('-', true) }}){% if not loop.last %} · {% endif %}
+                  {% endfor %}
+                </p>
+              {% endif %}
+              <p class="meta">Last seen {{ target.last_seen_at }}</p>
+            </section>
+          </article>
+        {% endfor %}
+      </div>
+    </details>
+  {% endif %}
+{% else %}
+  <article class="phone-card empty-card">
+    <h3>No targets synced yet / 아직 동기화되지 않았습니다</h3>
+  </article>
+{% endif %}

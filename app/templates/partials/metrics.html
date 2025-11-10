@@ -1,0 +1,77 @@
+<div class="metrics-grid">
+  <article class="metric-card">
+    <h3>Total / 전체</h3>
+    <p>{{ summary.total }}</p>
+  </article>
+  <article class="metric-card">
+    <h3>Posted / 게시</h3>
+    <p>{{ summary.posted }}</p>
+    <small>Telegram: {{ summary.telegram_posted }} · X: {{ summary.twitter_posted }}</small>
+  </article>
+  <article class="metric-card">
+    <h3>Pending / 대기</h3>
+    <p>{{ summary.pending }}</p>
+    <small>Manual: {{ summary.manual_required }}</small>
+  </article>
+  <article class="metric-card">
+    <h3>Skipped / 건너뜀</h3>
+    <p>{{ summary.skipped }}</p>
+  </article>
+  <article class="metric-card">
+    <h3>Errors / 오류</h3>
+    <p>{{ summary.error }}</p>
+  </article>
+  <article class="metric-card">
+    <h3>Engagement Total / 상호작용 전체</h3>
+    <p>{{ engagement_summary.total }}</p>
+    <small>Likes: {{ engagement_summary.like }} · Replies: {{ engagement_summary.reply }}</small>
+  </article>
+  <article class="metric-card">
+    <h3>Engagement Pending / 대기</h3>
+    <p>{{ engagement_summary.pending }}</p>
+  </article>
+  <article class="metric-card">
+    <h3>Engagement Completed / 완료</h3>
+    <p>{{ engagement_summary.completed }}</p>
+  </article>
+  <article class="metric-card">
+    <h3>Engagement Errors / 오류</h3>
+    <p>{{ engagement_summary.error }}</p>
+  </article>
+  {% set inner_targets = mindshare_targets | selectattr('inner_circle') | list %}
+  {% set source_labels = {
+    "gomtu_lb_stats": "Gomtu",
+    "gomtu_top_yappers": "Gomtu Top",
+    "kaito_supabase": "Kaito LB",
+    "kaito_targets": "Kaito Targets",
+    "kaito": "Kaito Legacy"
+  } %}
+  {% set grouped_sources = mindshare_targets | groupby('source') %}
+  <article class="metric-card">
+    <h3>Mindshare Targets / 모니터링 계정</h3>
+    <p>{{ mindshare_targets|length }}</p>
+    <small>
+      {% if mindshare_targets %}
+        Inner Circle: {{ inner_targets|length }}
+        {% if grouped_sources %}
+          · Sources:
+          {% for group in grouped_sources %}
+            {{ source_labels.get(group.grouper, group.grouper) }} ({{ group.list|length }}){% if not loop.last %}, {% endif %}
+          {% endfor %}
+        {% endif %}
+      {% else %}
+        sync pending
+      {% endif %}
+    </small>
+  </article>
+  {% set priority_projects = priority_projects or [] %}
+  {% set upcoming_hot = priority_projects | selectattr('upcoming_event_days') | selectattr('upcoming_event_days', 'le', 14) | list %}
+  {% set saturated_projects = priority_projects | selectattr('saturating') | list %}
+  <article class="metric-card">
+    <h3>Priority Projects / 우선 타깃</h3>
+    <p>{{ priority_projects|length }}</p>
+    <small>
+      Upcoming ≤14d: {{ upcoming_hot|length }} · Saturation: {{ saturated_projects|length }}
+    </small>
+  </article>
+</div>

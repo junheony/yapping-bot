@@ -1,0 +1,20 @@
+<div class="log-stack">
+  {% if logs %}
+    {% for log in logs %}
+      <article class="log-card">
+        <header class="log-card__header">
+          <span class="log-card__time">{{ log.at }}</span>
+          <span class="log-card__event badge">{{ log.event }}</span>
+        </header>
+        <div class="log-card__body">
+          <h4 class="log-card__title">{{ log.title or "Untitled" }}</h4>
+          <p class="log-card__detail">{{ log.detail or "—" }}</p>
+        </div>
+      </article>
+    {% endfor %}
+  {% else %}
+    <div class="log-card log-card--empty">
+      <p>No logs yet / 아직 로그가 없습니다</p>
+    </div>
+  {% endif %}
+</div>

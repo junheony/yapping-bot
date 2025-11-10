@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>{{ title or "Yapping Admin" }} </title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="{{ url_for('static', path='/css/styles.css') }}">
+    <script src="https://unpkg.com/htmx.org@1.9.10" integrity="sha384-0n8sF7w1YgnSU+oqBYwygJyI072QtdgQXl3k5ufADG7n2jDzy83H8Yx3oytC0uXQ" crossorigin="anonymous"></script>
+  </head>
+  <body>
+    <header class="app-header">
+      <h1>{{ header or "Yapping Admin / 야핑 어드민" }}</h1>
+    </header>
+    <main class="app-container">
+      {% block content %}{% endblock %}
+    </main>
+    <footer class="app-footer">
+      <small>Yapping Bot Control Panel / 야핑 봇 제어판</small>
+    </footer>
+  </body>
+</html>

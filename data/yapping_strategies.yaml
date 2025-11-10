@@ -1,0 +1,54 @@
+strategies:
+  initial_seeding:
+    name: "초기선점"
+    description: "온보딩 직후 혹은 등장 초기에 빠르게 포스팅해 기본 점수를 확보"
+    weight: 4.0
+    accounts:
+      - openmind_agi
+      - GoKiteAI
+  noble_house:
+    name: "대감집 노비"
+    description: "대형 계정/프로젝트와 경쟁하면서 높은 보상을 노리는 전략"
+    weight: 6.0
+    accounts:
+      - MMTFinance
+      - SentientAGI
+  empty_house:
+    name: "빈집털이"
+    description: "경쟁이 적은 프로젝트를 집중 공략해 랭킹을 쉽게 올리는 전략"
+    weight: 5.0
+    accounts:
+      - Everlyn_ai
+      - billions_ntwk
+      - EdgenTech
+  alternative_platforms:
+    name: "카이토 대체재"
+    description: "Kaito 외에 급부상 중인 플랫폼(Vooi, Limitless, Tria 등)을 공략"
+    weight: 3.5
+    accounts:
+      - Vooi_io
+      - limitlessai_
+      - tria_xyz
+  keyword_cluster:
+    name: "키워드 클러스터"
+    description: "특정 생태계/키워드(ZK, Base, Sui 등)를 묶어 연쇄적으로 언급"
+    weight: 4.5
+    accounts:
+      - bongbongcrypto
+      - base
+      - SuiNetwork
+  altruistic:
+    name: "보상 없어도 글쓰기"
+    description: "보상 공지가 없어도 향후 분배·리콜 가능성을 보고 꾸준히 작성"
+    weight: 3.0
+    accounts:
+      - megaeth_labs
+      - opensea
+      - AbstractChain
+      - Polymarket
+  account_power:
+    name: "계정 파워 우선"
+    description: "프로젝트보다는 계정 자체의 영향력과 팔로워 성장을 중시"
+    weight: 2.5
+    accounts:
+      - namninn_ftw

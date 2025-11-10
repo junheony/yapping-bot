@@ -1,0 +1,2 @@
+"""Yapping bot application package."""
+

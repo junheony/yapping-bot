@@ -1,0 +1,100 @@
+priority_projects:
+  - key: tria
+    name: "Tria"
+    category: "AI Agent Infra"
+    weight: 8.5
+    status: "active"
+    onboarded: true
+    lookahead_days: 21
+    max_mindshare: 4.0
+    tickers:
+      - TRIA
+    official_handles:
+      - useTria
+    community_handles:
+      - tria_xyz
+      - Tria_Hub
+    keywords:
+      - "Tria"
+      - "$TRIA"
+      - "useTria"
+    search_queries:
+      - "\"Tria\" -from:useTria -is:retweet"
+      - "\"$TRIA\" lang:en -is:retweet"
+      - "\"useTria\" -from:useTria"
+    notes: "Focus on early Tria tooling drops before competition heats up."
+
+  - key: billions
+    name: "Billions Network"
+    category: "Social x AI"
+    weight: 8.0
+    status: "active"
+    onboarded: true
+    lookahead_days: 28
+    max_mindshare: 3.5
+    tickers:
+      - BILLIONS
+    official_handles:
+      - billions_ntwk
+    community_handles:
+      - billionsalpha
+      - billions_og
+    keywords:
+      - "Billions Network"
+      - "$BILLIONS"
+      - "billions_ntwk"
+    search_queries:
+      - "\"Billions Network\" -from:billions_ntwk -is:retweet"
+      - "\"$BILLIONS\" lang:en -is:retweet"
+      - "\"billions_ntwk\" -from:billions_ntwk"
+    notes: "High upside pre-TGE content. Prioritise human stories and utility threads."
+
+  - key: standx
+    name: "StandX"
+    category: "DeFi Safety"
+    weight: 7.5
+    status: "preTGE"
+    onboarded: false
+    lookahead_days: 35
+    max_mindshare: 2.5
+    tickers:
+      - STANDX
+    official_handles:
+      - StandX_Official
+    community_handles:
+      - StandX_KR
+      - StandXBuilders
+    keywords:
+      - "StandX"
+      - "$STANDX"
+      - "StandX_Official"
+    search_queries:
+      - "\"StandX\" -from:StandX_Official -is:retweet"
+      - "\"$STANDX\" lang:en -is:retweet"
+      - "\"StandX\" \"Move\" -is:retweet"
+    notes: "Focus on security narratives and case studies once the launch window appears on the calendar."
+
+  - key: falconstable
+    name: "Falcon Stable"
+    category: "Stablecoin"
+    weight: 7.0
+    status: "preTGE"
+    onboarded: false
+    lookahead_days: 35
+    max_mindshare: 2.0
+    tickers:
+      - FALCON
+    official_handles:
+      - FalconStable
+    community_handles:
+      - FalconEarly
+      - FalconBuilders
+    keywords:
+      - "Falcon Stable"
+      - "$FALCON"
+      - "FalconStable"
+    search_queries:
+      - "\"Falcon Stable\" -from:FalconStable -is:retweet"
+      - "\"FalconStable\" -from:FalconStable -is:retweet"
+      - "\"$FALCON\" lang:en -is:retweet"
+    notes: "Emphasise real-world utility pilots and community incentives leading into TGE."

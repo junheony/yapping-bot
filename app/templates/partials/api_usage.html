@@ -1,0 +1,63 @@
+{% set usage = api_usage or {} %}
+{% set metrics = usage.metrics or [] %}
+{% set window_start = usage.window_start %}
+{% set window_end = usage.window_end %}
+
+{% set posts_metric = (metrics | selectattr('key', 'equalto', 'search_posts_pulled') | list | first) %}
+{% set requests_metric = (metrics | selectattr('key', 'equalto', 'search_requests') | list | first) %}
+
+<div class="usage-header">
+  <div>
+    <h2>Usage / 사용량</h2>
+    <span class="usage-window">{{ window_start | default('-', true) }} → {{ window_end | default('-', true) }}</span>
+  </div>
+  <button class="btn btn-ghost" hx-get="/admin/partials/usage" hx-target="#usage-overview" hx-swap="outerHTML">Refresh</button>
+</div>
+
+{% if posts_metric %}
+  {% set percent = posts_metric.percent or 0 %}
+  <div class="usage-bar">
+    <div class="usage-bar__track">
+      <div class="usage-bar__fill" style="transform: scaleX({{ percent / 100 }})"></div>
+    </div>
+    <div class="usage-bar__labels">
+      <span>{{ posts_metric.meta.window | default(posts_metric.value, true) }} / {{ posts_metric.cap | default('-', true) }}</span>
+      <span>{{ "%.2f"|format(percent) }}%</span>
+    </div>
+  </div>
+
+  <div class="usage-stat-grid">
+    <div class="usage-stat">
+      <span class="usage-stat__label">Raw pulls</span>
+      <span class="usage-stat__value">{{ posts_metric.meta.raw or posts_metric.value }}</span>
+      <small class="usage-updated">Baseline {{ posts_metric.meta.baseline or 0 }}</small>
+    </div>
+    <div class="usage-stat">
+      <span class="usage-stat__label">Remaining</span>
+      <span class="usage-stat__value">{{ (posts_metric.cap or 0) - (posts_metric.value or 0) }}</span>
+      <small class="usage-updated">Cap {{ posts_metric.cap or 0 }}</small>
+    </div>
+    {% if posts_metric.updated_at %}
+      <div class="usage-stat">
+        <span class="usage-stat__label">Last updated</span>
+        <span class="usage-stat__value">{{ posts_metric.updated_at }}</span>
+      </div>
+    {% endif %}
+  </div>
+{% endif %}
+
+<div class="usage-foot">
+  <strong>Search requests</strong>
+  {% if requests_metric %}
+    <span>Window {{ requests_metric.value | default(0, true) }} · Raw {{ requests_metric.meta.raw or requests_metric.value }} · Baseline {{ requests_metric.meta.baseline or 0 }}</span>
+    {% if requests_metric.meta.last_query %}
+      <span>Last query: {{ requests_metric.meta.last_query }}</span>
+    {% endif %}
+    {% if requests_metric.updated_at %}
+      <span>Updated {{ requests_metric.updated_at }}</span>
+    {% endif %}
+  {% else %}
+    <span>No request data captured yet.</span>
+  {% endif %}
+  <span class="helper-text">Reset the baseline in <code>.env</code> to align the chart with the official X usage screen.</span>
+</div>

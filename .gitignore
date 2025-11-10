@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.py[cod]
+*.log
+.DS_Store
+.env
+data/*.db
+logs/
+uvicorn.pid
+run.log

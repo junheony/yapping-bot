@@ -1,0 +1,42 @@
+{% if engagement_logs %}
+  {% for log in engagement_logs %}
+    <tr>
+      <td>
+        <div class="log-primary">{{ log.at }}</div>
+        {% if log.author %}
+          <div class="log-meta">@{{ log.author }}</div>
+        {% endif %}
+      </td>
+      <td>
+        {% if log.tweet_url %}
+          <a href="{{ log.tweet_url }}" target="_blank" rel="noopener" class="link-muted">Tweet</a>
+        {% elif log.tweet_id %}
+          <span class="log-secondary">{{ log.tweet_id }}</span>
+        {% else %}
+          <span class="log-secondary">-</span>
+        {% endif %}
+        {% if log.tweet_id %}
+          <div class="log-meta">{{ log.tweet_id }}</div>
+        {% endif %}
+      </td>
+      <td><span class="badge badge--event">{{ log.event }}</span></td>
+      <td>
+        <span class="badge badge--action">{{ log.action }}</span>
+      </td>
+      <td>{{ log.detail or "" }}</td>
+      <td>
+        {% if log.reason %}
+          <div class="reason-tags">
+            {% for token in log.reason.split('|') if token %}
+              <span class="badge badge--reason">{{ token }}</span>
+            {% endfor %}
+          </div>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+{% else %}
+  <tr>
+    <td colspan="6" class="empty-state">No engagement logs yet / 아직 상호작용 로그가 없습니다</td>
+  </tr>
+{% endif %}

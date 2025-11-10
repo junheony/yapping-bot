@@ -1,0 +1,201 @@
+{% extends "base.html" %}
+
+{% block content %}
+{% set inner_targets = mindshare_targets | selectattr('inner_circle') | list %}
+{% set summary_cards = [
+  {"label": "Posts Pending", "value": summary.pending, "meta": "Manual " ~ summary.manual_required},
+  {"label": "Posts Skipped", "value": summary.skipped, "meta": "Errors " ~ summary.error},
+  {"label": "Engagement Pending", "value": engagement_summary.pending, "meta": "Processing " ~ engagement_summary.processing},
+  {"label": "Engagement Errors", "value": engagement_summary.error, "meta": "Completed " ~ engagement_summary.completed},
+  {"label": "Queue Backlog", "value": items|length, "meta": "Approved awaiting"},
+  {"label": "Mindshare Targets", "value": mindshare_targets|length, "meta": "Inner " ~ inner_targets|length}
+] %}
+
+<div class="dashboard-shell">
+  <section class="summary-strip">
+    {% for card in summary_cards %}
+      <article class="summary-card">
+        <span class="summary-label">{{ card.label }}</span>
+        <span class="summary-value">{{ card.value | default(0) }}</span>
+        {% if card.meta %}<span class="summary-meta">{{ card.meta }}</span>{% endif %}
+      </article>
+    {% endfor %}
+  </section>
+  <nav class="tab-nav">
+    <button class="tab-nav__btn is-active" data-tab="overview">Overview</button>
+    <button class="tab-nav__btn" data-tab="queues">Queues</button>
+    <button class="tab-nav__btn" data-tab="mindshare">Mindshare</button>
+    <button class="tab-nav__btn" data-tab="logs">Logs</button>
+  </nav>
+
+  <div class="tab-content">
+    <section class="tab-pane tab-pane--active" data-tab="overview">
+      <div class="dual-grid">
+        <div class="panel panel-elevated usage-panel" id="usage-overview">
+          {% include "partials/api_usage.html" with context %}
+        </div>
+        <div class="panel panel-elevated hero-card hero-card--actions" id="engagement-control">
+          {% include "partials/engagement_control.html" with context %}
+        </div>
+      </div>
+      <div class="dual-grid dual-grid--stretch">
+        <section class="panel board-panel">
+          <header class="panel-header">
+            <h2>Mindshare Highlights</h2>
+            <div class="panel-actions">
+              <button type="button" class="btn btn-ghost" hx-get="/admin/partials/mindshare-priority" hx-target="#mindshare-priority-overview" hx-swap="outerHTML">
+                Refresh
+              </button>
+            </div>
+          </header>
+          <div id="mindshare-priority-overview">
+            {% include "partials/mindshare_priority.html" with mindshare_priority=mindshare_priority[:6] %}
+          </div>
+        </section>
+        <section class="panel board-panel">
+          <header class="panel-header">
+            <h2>Priority Projects / 우선 공략</h2>
+            <div class="panel-actions">
+              <button type="button" class="btn" hx-get="/admin/partials/priority-projects" hx-target="#priority-projects-overview" hx-swap="outerHTML">
+                Refresh
+              </button>
+            </div>
+          </header>
+          <div id="priority-projects-overview">
+            {% include "partials/priority_projects.html" with context %}
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section class="tab-pane" data-tab="queues">
+      <div class="dual-grid dual-grid--stretch">
+        <section class="panel board-panel">
+          <header class="panel-header">
+            <h2>Content Queue / 콘텐츠 큐</h2>
+            <div class="panel-actions">
+              <button type="button" class="btn" hx-get="/admin/partials/queue" hx-target="#queue-board" hx-swap="outerHTML">
+                Refresh
+              </button>
+            </div>
+          </header>
+          <div class="phone-grid" id="queue-board">
+            {% include "partials/queue_cards.html" with context %}
+          </div>
+        </section>
+        <section class="panel board-panel">
+          <header class="panel-header">
+            <h2>Engagement Queue / 상호작용 큐</h2>
+            <div class="panel-actions">
+              <button type="button" class="btn" hx-get="/admin/partials/engagement" hx-target="#engagement-board" hx-swap="outerHTML">
+                Refresh
+              </button>
+            </div>
+          </header>
+          <div class="engagement-grid" id="engagement-board">
+            {% include "partials/engagement_table.html" with context %}
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section class="tab-pane" data-tab="mindshare">
+      <div class="dual-grid dual-grid--stretch">
+        <div class="panel panel-elevated">
+          <header class="panel-header">
+            <h2>Priority Projects / 우선 공략</h2>
+            <div class="panel-actions">
+              <button type="button" class="btn" hx-get="/admin/partials/priority-projects" hx-target="#priority-projects-mindshare" hx-swap="outerHTML">
+                Refresh
+              </button>
+            </div>
+          </header>
+          <div id="priority-projects-mindshare">
+            {% include "partials/priority_projects.html" with context %}
+          </div>
+        </div>
+        <aside class="panel board-panel sticky-panel">
+          <header class="panel-header">
+            <h2>Mindshare Targets / 마인드셰어 타깃</h2>
+            <div class="panel-actions">
+              <button type="button" class="btn btn-ghost" hx-get="/admin/partials/mindshare" hx-target="#mindshare-board" hx-swap="outerHTML">
+                Refresh
+              </button>
+            </div>
+          </header>
+          <div id="mindshare-board">
+            {% include "partials/mindshare_board.html" with context %}
+          </div>
+        </aside>
+        <section class="panel board-panel">
+          <header class="panel-header">
+            <h2>Mindshare Priority / 우선 타깃</h2>
+            <div class="panel-actions">
+              <button type="button" class="btn btn-ghost" hx-get="/admin/partials/mindshare-priority" hx-target="#mindshare-priority" hx-swap="outerHTML">
+                Refresh
+              </button>
+            </div>
+          </header>
+          <div id="mindshare-priority">
+            {% include "partials/mindshare_priority.html" with context %}
+          </div>
+        </section>
+      </div>
+    </section>
+
+    <section class="tab-pane" data-tab="logs">
+      <section class="panel logs-panel">
+        <header class="panel-header">
+          <h2>Activity Logs / 활동 로그</h2>
+        </header>
+        <div class="logs-grid">
+          <div class="log-column">
+            <div class="log-column__header">
+              <h3>Recent Posts</h3>
+              <button type="button" class="btn btn-ghost" hx-get="/admin/partials/logs" hx-target="#recent-log-stack" hx-swap="outerHTML">
+                Refresh
+              </button>
+            </div>
+            <div id="recent-log-stack">
+              {% include "partials/log_cards.html" with context %}
+            </div>
+          </div>
+          <div class="log-column">
+            <div class="log-column__header">
+              <h3>Engagement Logs</h3>
+              <button type="button" class="btn btn-ghost" hx-get="/admin/partials/engagement-logs" hx-target="#engagement-log-stack" hx-swap="outerHTML">
+                Refresh
+              </button>
+            </div>
+            <div id="engagement-log-stack">
+              {% include "partials/engagement_log_cards.html" with context %}
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="panel board-panel">
+        <header class="panel-header">
+          <h2>Engagement Outcomes / 상호작용 성과</h2>
+        </header>
+        {% include "partials/engagement_outcomes.html" with context %}
+      </section>
+    </section>
+  </div>
+</div>
+
+<script>
+  document.addEventListener("DOMContentLoaded", () => {
+    const buttons = document.querySelectorAll(".tab-nav__btn");
+    const panes = document.querySelectorAll(".tab-pane");
+    buttons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const target = btn.dataset.tab;
+        buttons.forEach((b) => b.classList.toggle("is-active", b === btn));
+        panes.forEach((pane) => {
+          pane.classList.toggle("tab-pane--active", pane.dataset.tab === target);
+        });
+      });
+    });
+  });
+</script>
+{% endblock %}

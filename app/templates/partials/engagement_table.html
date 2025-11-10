@@ -1,0 +1,92 @@
+{% set buckets = engagement_buckets or [] %}
+{% if buckets %}
+  {% for bucket in buckets %}
+    {% set project = bucket.project %}
+    {% set visible = bucket.tasks[:6] %}
+    {% set hidden = bucket.tasks[6:] %}
+    <section class="engagement-cluster">
+      <header class="engagement-cluster__header">
+        <div>
+          <h3>
+            {% if project %}
+              {{ project.name }}
+            {% else %}
+              General Queue / 일반 큐
+            {% endif %}
+          </h3>
+          <p class="meta">
+            {% if project %}
+              λ {{ "%.1f"|format(project.weight) }}
+              {% if project.upcoming_event_days is not none %} · {{ project.upcoming_event_days }}d{% endif %}
+              {% if project.key %} · #{{ project.key }}{% endif %}
+            {% else %}
+              No project match
+            {% endif %}
+          </p>
+        </div>
+        <span class="badge">{{ bucket.tasks|length }} tasks</span>
+      </header>
+      <ul class="engagement-grid-list">
+        {% for entry in visible %}
+          {% set task = entry.task %}
+          <li class="engagement-item" id="engagement-card-{{ task.id }}">
+            <div class="engagement-item__heading">
+              <div>
+                <strong>@{{ task.author_username or "unknown" }}</strong>
+                <span class="meta">Score {{ "%.1f"|format(task.score or 0) }} • {{ task.action }}</span>
+              </div>
+              <a href="{{ task.tweet_url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-ghost--sm">Open</a>
+            </div>
+            <p class="engagement-snippet">{{ task.text }}</p>
+            <div class="engagement-item__footer">
+              <span class="meta">Status {{ task.status }} • Attempts {{ task.attempt_count }}</span>
+              {% set tags = entry.tags or [] %}
+              {% if tags %}
+                <div class="engagement-item__tags">
+                  {% for tag in tags[:2] %}
+                    <span class="badge">{{ tag }}</span>
+                  {% endfor %}
+                </div>
+              {% endif %}
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+      {% if hidden %}
+        <details class="engagement-more">
+          <summary>Show remaining {{ hidden|length }} tasks</summary>
+          <ul class="engagement-grid-list engagement-grid-list--nested">
+            {% for entry in hidden %}
+              {% set task = entry.task %}
+              <li class="engagement-item" id="engagement-card-{{ task.id }}">
+                <div class="engagement-item__heading">
+                  <div>
+                    <strong>@{{ task.author_username or "unknown" }}</strong>
+                    <span class="meta">Score {{ "%.1f"|format(task.score or 0) }} • {{ task.action }}</span>
+                  </div>
+                  <a href="{{ task.tweet_url }}" target="_blank" rel="noopener" class="btn btn-ghost btn-ghost--sm">Open</a>
+                </div>
+                <p class="engagement-snippet">{{ task.text }}</p>
+                <div class="engagement-item__footer">
+                  <span class="meta">Status {{ task.status }} • Attempts {{ task.attempt_count }}</span>
+                  {% set tags = entry.tags or [] %}
+                  {% if tags %}
+                    <div class="engagement-item__tags">
+                      {% for tag in tags[:2] %}
+                        <span class="badge">{{ tag }}</span>
+                      {% endfor %}
+                    </div>
+                  {% endif %}
+                </div>
+              </li>
+            {% endfor %}
+          </ul>
+        </details>
+      {% endif %}
+    </section>
+  {% endfor %}
+{% else %}
+  <article class="phone-card empty-card">
+    <h3>No engagement tasks yet / 아직 상호작용 항목이 없습니다</h3>
+  </article>
+{% endif %}

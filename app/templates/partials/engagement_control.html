@@ -1,0 +1,26 @@
+<header class="panel-header panel-header--dense">
+  <div>
+    <h2>Engagement Worker</h2>
+    <p class="meta">Manual control to prevent unexpected token usage.</p>
+  </div>
+</header>
+<div class="hero-actions">
+  {% if engagement_running %}
+    <span class="status-badge status-badge--on">Running</span>
+    <form hx-post="/admin/engagement/stop" hx-target="#engagement-control" hx-swap="outerHTML" class="hero-action-form" hx-on::afterSwap="htmx.ajax('GET','/admin/partials/usage',{target:'#usage-overview'})">
+      <button class="btn btn-warn" type="submit">Stop Worker</button>
+    </form>
+    <small class="meta">Discovery is active. Monitor API usage above.</small>
+  {% else %}
+    <span class="status-badge status-badge--off">Idle</span>
+    <form hx-post="/admin/engagement/start" hx-target="#engagement-control" hx-swap="outerHTML" class="hero-action-form" hx-on::afterSwap="htmx.ajax('GET','/admin/partials/usage',{target:'#usage-overview'})">
+      <button class="btn btn-primary" type="submit">Start Discovery</button>
+    </form>
+    <small class="meta">Paused. Tokens will not be spent until you start discovery.</small>
+  {% endif %}
+  <div class="insights-status">
+    <span class="status-badge {{ 'status-badge--on' if insights_running else 'status-badge--off' }}">Insights {{ 'Running' if insights_running else 'Idle' }}</span>
+    <small class="meta">Captures follow-back and engagement stats after each action.</small>
+  </div>
+  <p class="helper-text">Set <code>ENGAGEMENT_AUTO_START=true</code> in <code>.env</code> if you want the worker to boot automatically.</p>
+</div>

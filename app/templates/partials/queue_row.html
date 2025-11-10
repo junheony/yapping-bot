@@ -1,0 +1,38 @@
+<tr id="queue-row-{{ item.hash }}">
+  <td class="col-title">
+    <div class="title">{{ item.title }}</div>
+    <div class="meta">
+      <span>{{ item.source_type or "unknown" }}</span>
+      {% if item.tags %}
+      <span>· {{ ", ".join(item.tags) }}</span>
+      {% endif %}
+    </div>
+  </td>
+  <td>
+    <span class="badge">{{ item.status }}</span>
+    {% if item.manual_review_required %}
+      <span class="badge badge-warn">manual / 수동</span>
+    {% endif %}
+  </td>
+  <td>
+    <div>{{ item.queued_at or "" }}</div>
+    <div class="meta">tries 시도: {{ item.attempt_count }}</div>
+  </td>
+  <td class="actions">
+    <form hx-post="/admin/queue/{{ item.hash }}/approve" hx-target="#queue-row-{{ item.hash }}" hx-swap="outerHTML" class="inline-form">
+      <button type="submit" class="btn btn-primary">
+        Approve &amp; Post / 승인·게시
+      </button>
+    </form>
+    <form hx-post="/admin/queue/{{ item.hash }}/approve?process_immediately=false" hx-target="#queue-row-{{ item.hash }}" hx-swap="outerHTML" class="inline-form">
+      <button type="submit" class="btn">
+        Approve Only / 승인만
+      </button>
+    </form>
+    <form hx-post="/admin/queue/{{ item.hash }}/skip" hx-target="#queue-row-{{ item.hash }}" hx-swap="outerHTML" class="inline-form">
+      <button type="submit" class="btn btn-warn">
+        Skip / 건너뛰기
+      </button>
+    </form>
+  </td>
+</tr>

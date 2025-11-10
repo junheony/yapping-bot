@@ -1,0 +1,67 @@
+{% if priority_projects %}
+  <div class="priority-grid">
+    {% for project in priority_projects %}
+      <article class="priority-card{% if project.saturating %} priority-card--heat{% endif %}">
+        <header class="priority-card__header">
+          <div>
+            <h3>{{ project.name }}</h3>
+            <p class="meta">{{ project.category or "Uncategorised" }}</p>
+          </div>
+          <div class="priority-card__badges">
+            <span class="badge">{{ project.status }}</span>
+            {% if project.onboarded %}
+              <span class="badge badge-positive">Onboarded</span>
+            {% else %}
+              <span class="badge badge-pulse">Watch</span>
+            {% endif %}
+            <span class="badge">λ {{ "%.1f"|format(project.weight) }}</span>
+          </div>
+        </header>
+        <section class="priority-card__body">
+          <dl class="priority-card__stats">
+            <div>
+              <dt>Upcoming</dt>
+              <dd>
+                {% if project.upcoming_event_days is not none %}
+                  In {{ project.upcoming_event_days }}d
+                {% else %}
+                  No event cached
+                {% endif %}
+              </dd>
+            </div>
+            <div>
+              <dt>Mindshare</dt>
+              <dd>
+                {% if project.last_mindshare_score is not none %}
+                  {{ "%.2f"|format(project.last_mindshare_score) }}
+                {% else %}
+                  –
+                {% endif %}
+              </dd>
+            </div>
+            <div>
+              <dt>Handles</dt>
+              <dd>
+                {% if project.handle_labels %}
+                  {% for handle in project.handle_labels[:3] %}
+                    {{ handle }}{% if not loop.last %}, {% endif %}
+                  {% endfor %}
+                  {% if project.handle_labels|length > 3 %}+{{ project.handle_labels|length - 3 }}{% endif %}
+                {% else %}
+                  n/a
+                {% endif %}
+              </dd>
+            </div>
+          </dl>
+          {% if project.notes %}
+            <p class="priority-card__notes">{{ project.notes }}</p>
+          {% endif %}
+        </section>
+      </article>
+    {% endfor %}
+  </div>
+{% else %}
+  <article class="priority-empty">
+    <p>No priority projects loaded. Update <code>data/project_targets.yaml</code>.</p>
+  </article>
+{% endif %}

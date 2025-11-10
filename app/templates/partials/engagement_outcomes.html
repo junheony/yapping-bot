@@ -1,0 +1,43 @@
+{% if engagement_outcomes %}
+  <div class="outcomes-grid">
+    {% for outcome in engagement_outcomes %}
+      <article class="outcome-card">
+        <header class="outcome-card__header">
+          <div>
+            <h4>@{{ outcome.author_username or "unknown" }}</h4>
+            <p class="meta">Checked {{ outcome.checked_at }}</p>
+          </div>
+          <a class="btn btn-ghost btn-ghost--sm" href="https://twitter.com/i/status/{{ outcome.tweet_id }}" target="_blank" rel="noopener">Open</a>
+        </header>
+        <div class="outcome-card__stats">
+          <div>
+            <span class="outcome-label">Likes</span>
+            <span class="outcome-value">{{ outcome.like_count if outcome.like_count is not none else '–' }}</span>
+          </div>
+          <div>
+            <span class="outcome-label">Replies</span>
+            <span class="outcome-value">{{ outcome.reply_count if outcome.reply_count is not none else '–' }}</span>
+          </div>
+          <div>
+            <span class="outcome-label">Follow back</span>
+            <span class="outcome-value">{% if outcome.author_following is none %}?{% elif outcome.author_following %}Yes{% else %}No{% endif %}</span>
+          </div>
+          <div>
+            <span class="outcome-label">Replied</span>
+            <span class="outcome-value">{% if outcome.replied is none %}?{% elif outcome.replied %}Yes{% else %}No{% endif %}</span>
+          </div>
+        </div>
+        {% if outcome.reply_tweet_id %}
+          <p class="meta">Reply tweet: <a class="link-muted" href="https://twitter.com/i/status/{{ outcome.reply_tweet_id }}" target="_blank" rel="noopener">{{ outcome.reply_tweet_id }}</a></p>
+        {% endif %}
+        {% if outcome.notes %}
+          <p class="meta">Notes: {{ outcome.notes }}</p>
+        {% endif %}
+      </article>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="log-card log-card--empty">
+    <p>No engagement outcomes recorded yet.</p>
+  </div>
+{% endif %}

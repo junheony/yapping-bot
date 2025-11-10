@@ -1,0 +1,33 @@
+{% if mindshare_priority %}
+  <ol class="priority-list">
+    {% for item in mindshare_priority %}
+      <li class="priority-item">
+        <div class="priority-item__heading">
+          <div>
+            <strong>@{{ item.handle }}</strong>
+            <span class="meta">{{ item.display_name }}</span>
+          </div>
+          <span class="badge">{{ "%.1f"|format(item.priority_score) }}</span>
+        </div>
+        <div class="priority-item__meta">
+          <span>Source {{ item.source }}</span>
+          {% if item.rank %}<span>Rank #{{ item.rank }}</span>{% endif %}
+          {% if item.topic %}<span>{{ item.topic }}</span>{% endif %}
+          {% if item.inner_circle %}<span class="badge badge-inner">Inner</span>{% endif %}
+        </div>
+        <div class="priority-item__stats">
+          <span>Tasks {{ item.stats.total }}</span>
+          <span>Done {{ item.stats.completed }}</span>
+          <span>Errors {{ item.stats.errors }}</span>
+          <span>Follow {{ item.stats.follow_backs }}</span>
+          <span>Replies {{ item.stats.replies_back }}</span>
+        </div>
+        <span class="meta">Last seen {{ item.last_seen_at }}</span>
+      </li>
+    {% endfor %}
+  </ol>
+{% else %}
+  <div class="log-card log-card--empty">
+    <p>No mindshare targets stored yet.</p>
+  </div>
+{% endif %}
