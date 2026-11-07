@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import init_db
 from app.routers import admin_router, ingest_router
+from app.routers.msg_status import router as msg_status_router
 from app.services.engagement_repository import EngagementRepository
 from app.runtime import (
     engagement_worker,
@@ -24,6 +25,7 @@ app = FastAPI(
 )
 app.include_router(ingest_router)
 app.include_router(admin_router)
+app.include_router(msg_status_router)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
