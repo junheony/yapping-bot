@@ -1,0 +1,16 @@
+Production baseline for the four untracked service files.
+
+Remote default branch is main at 2e84ab90233e5c378b474f85b0f2d05221752aa1.
+origin has no branch v2 and no commit 7582ecfda4ca56a86641df654eb6f2d416c24cfa.
+These files are not in that main tree. They are the production working-tree
+copies from /home/max/yapping-bot (local branch v2, dirty, untracked).
+
+SHA256, matching the transfer metadata:
+77d85ced8a7c6c83e481fd5503ed5425b49fe3b8e2c3652524bd5f46bed777b0  app/services/tg_post.py
+b68473be1712bb01d03d27cf75d26752d66eca793e2946773348c38733ed7536  app/services/tg_route.py
+bcaf2cc59e961d4c5a85b46cebfaf8de337f0ce4a016605338864376a6597c58  app/services/tg_storyline.py
+007e3f21fc13cf5dc323f236785d8d269f03b5d4a7f7722db0d0e3de0ec413b8  app/services/tg_timing.py
+
+The copies in deploy/snapshots/ are byte-for-byte those files.
+deploy/patched/ is the same files after the quality fix.
+deploy/snapshot-relative.patch is the deployment diff against the snapshots.

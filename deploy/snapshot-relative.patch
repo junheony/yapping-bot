@@ -1,0 +1,1806 @@
+--- a/app/services/tg_post.py
++++ b/app/services/tg_post.py
+@@ -80,11 +80,9 @@
+   the whole line is fine, but each sentence should use ~다 / noun ending — never end the post on "~임"/"~함". For company
+   purchases write "매입"/"사들임" (never "매수"). Keep numbers exact to the source.
+ - points: return [] (posts have no bullet list). Only if one extra number is truly essential: ONE item <= 30 chars.
+-- Endings (2026-11-05 tg-ending, owner: "~사칭임" 어색함): plain 개조식 fact ending. Prefer a noun / noun phrase
+-  ("~ 재개 중", "~ 사칭이니 주의", "~부터 적용", "~달러 규모"), "~다" (재개했다, 늘었다), or "~중". "~임"/"~함"/"~했음"
+-  at most ONCE per post and never as the last word of the post; never a judgment glued to "~임" ("사칭임", "다른 주소임").
+-  Vary the last word between posts. BAD: "돈 받고 출금 순서를 앞당겨 준다는 연락은 사칭임" -> GOOD: "돈 받고 출금
+-  순서를 앞당겨 준다는 연락은 전부 사칭이니 주의". BAD: "결제액 역대 최고치 찍었음" -> GOOD: "결제액 월간 역대 최고치".
++- Endings (2026-11-07 quality): the why-it-matters line is plain ~다 and is not a repeat of the headline.
++  Never ~임, ~함, ~네, ~요, ~죠, ~습니다, or ~했음. BAD: "사칭임", "출시함", "방향이네", "찍었음".
++  GOOD: "돈 받고 출금 순서를 앞당겨 준다는 연락은 전부 사칭이니 주의한다". Headline may be a short noun phrase.
+ - BANNED summary-report verbs (they make it read like an AI summary): "~를 짚었다", "~라고 설명했다", "~라고 지적했다",
+   "~로 전망했다", "~라고 강조했다", "~라고 밝혔다", "~라고 언급했다", "~라고 덧붙였다", "~를 소개했다", "~라고 평가했다",
+   "~라고 주장했다", "~라고 분석했다", "~로 내다봤다". Say the thing itself, not that someone said it.
+@@ -224,6 +222,13 @@
+     ti = tone_issue(cm)
+     if ti:
+         out.append(ti)
++    try:  # 2026-11-07: ~다 why-line, no ~임/~함/~네, no emoji/mention. Import stays local.
++        from ..quality.tg_news import extra_comment_issues
++        for issue in extra_comment_issues(cm, headline):
++            if issue not in out:
++                out.append(issue)
++    except Exception as e:
++        log.info("comment style gate unavailable: %s", type(e).__name__)
+     return out
+ 
+ 
+@@ -288,16 +293,7 @@
+     return (m.group(1), m.group(2)) if m else None
+ 
+ 
+-def fx_media(url: str, post: dict | None = None) -> str | None:
+-    """Photo URL (or video/gif thumbnail) of an X post: collected post data first, else api.fxtwitter.com (free)."""
+-    if post:
+-        try:
+-            from .ai_news import _media_urls_from_post
+-            us = _media_urls_from_post(post)
+-            if us:
+-                return us[0]
+-        except Exception:
+-            pass
++def _fetch_fx_tweet(url: str) -> dict | None:
+     st = _status(url)
+     if not st:
+         return None
+@@ -308,15 +304,38 @@
+     except Exception as e:
+         log.warning("fxtwitter media %s: %s", url, e)
+         return None
+-    t = d.get("tweet") or {}
+-    med = t.get("media") or {}
+-    for p in med.get("photos") or []:
+-        if p.get("url"):
+-            return p["url"]
+-    for v in (med.get("videos") or []) + (med.get("all") or []):
+-        if v.get("thumbnail_url"):
+-            return v["thumbnail_url"]
+-    return None
++    return d.get("tweet") or {}
++
++
++def decide_media(url: str, post: dict | None = None, tweet: dict | None = None, story_text: str = "", *,
++                 fetch: bool = True, logo_fn=None) -> dict:
++    """Approved official capture / verified demo, else text. Records every rejected URL and why.
++
++    Does not treat a video thumbnail or a quoted-post image as a photo. Bare URL lists from
++    ai_news._media_urls_from_post are not selected: they have no type or provenance.
++    """
++    from ..quality.tg_news import candidates_from_fx, candidates_from_post, choose_media
++    cands = []
++    if isinstance(tweet, dict):
++        cands += candidates_from_fx(tweet, "original")
++    if isinstance(post, dict):
++        cands += candidates_from_post(post, "original")
++    if fetch and tweet is None:
++        fetched = _fetch_fx_tweet(url)
++        if fetched:
++            cands += candidates_from_fx(fetched, "original")
++    return choose_media(cands, story_text=story_text, logo_fn=logo_fn, link=url,
++                        official_capture_handles=OFFICIAL_CAPTURE)
++
++
++def fx_media(url: str, post: dict | None = None) -> str | None:
++    """Approved photo URL only. Unchecked thumbnails, quote images, and logos return None."""
++    try:
++        decision = decide_media(url, post=post, fetch=True)
++    except Exception as e:
++        log.warning("media decision %s: %s", url, type(e).__name__)
++        return None
++    return decision.get("url") if decision.get("approved") else None
+ 
+ 
+ # 2026-11-05 tweetcap-main: official-notice accounts attach brand cards ("ANNOUNCEMENT" logo art). For those,
+@@ -542,19 +561,26 @@
+         if alts:
+             alts.sort()
+             _, _, _, fmt, body = alts[0]
+-    photo = fx_media(link, quote_post) if fetch_media else None
+-    logo = False
+-    if photo and fetch_media and logo_card(photo, link):   # 2026-11-05 tweetcap-main / 2026-11-06 broader
+-        logo = True
+-        photo = tweet_capture(link) or None   # capture fail -> text only (no logo, no fake card)
+-    if not photo and not logo and fetch_media and st["enabled"] and st.get("card", True):
+-        try:   # 2026-11-03 tgtone2: text-only source post -> rendered tweet card image
+-            from . import tg_card
+-            photo = tg_card.card(link)
++    # 2026-11-07: no generated card and no unchecked thumbnail. Capture only replaces a logo/brand card.
++    decision = {"url": None, "provenance": None, "approved": False, "preview": False, "rejected": [],
++                "allow_official_capture": False}
++    if fetch_media:
++        story_text = " ".join(str(fields.get(k) or "") for k in ("headline", "comment", "flash", "summary", "take"))
++        try:
++            decision = decide_media(link, post=quote_post, story_text=story_text, fetch=True,
++                                    logo_fn=(lambda u: logo_card(u, link)))
+         except Exception as e:
+-            log.info("tweet card: %s", type(e).__name__)
++            log.info("media decision: %s", type(e).__name__)
++            decision = {**decision, "rejected": [{"url": None, "kind": "unknown", "reason": "media_decision_error"}]}
++        if decision.get("allow_official_capture"):
++            cap = tweet_capture(link)
++            if cap:
++                decision = {**decision, "url": cap, "provenance": "official_capture", "approved": True, "reason": None}
++            else:
++                decision = {**decision, "url": None, "provenance": None, "approved": False}
++    photo = decision.get("url") if decision.get("approved") else None
+     return {"body": body, "fmt": fmt, "bullet": bullet if fmt == "bullets" else None, "photo": photo,
+-            "photo_ok": bool(photo)}
++            "photo_ok": bool(photo), "media": decision}
+ 
+ 
+ def remember(fmt: str, bullet: str | None = None) -> None:
+@@ -608,9 +634,25 @@
+ 
+ # ------------------------------------------------------------------ send
+ def send(token: str, chat: str, body: str, parse_mode: str | None = None, photo: str | None = None,
+-         quote: dict | None = None, preview: bool = True) -> dict:
+-    """sendPhoto (caption <= 1024) when a photo is given, else / on failure sendMessage with link preview.
+-    photo may be a URL or a local file path. Returns the Telegram JSON (+ "via")."""
++         quote: dict | None = None, preview: bool = True, *, quality_item: dict | None = None,
++         media: dict | None = None) -> dict:
++    """sendPhoto only for an approved capture/demo. Text sends disable link previews.
++
++    preview is ignored for the text path: an unchecked page card can be the same unrelated
++    video frame. quality_item carries source text, author, and classification for the gate.
++    """
++    from ..quality.tg_news import apply_send_gate, media_log
++    meta = dict(quality_item or {})
++    if media:
++        meta["media"] = media
++    meta.setdefault("lane", (quality_item or {}).get("lane"))
++    gated = apply_send_gate(body, photo, meta)
++    logged = media_log(gated.get("media"))
++    if gated["drop"]:
++        return {"ok": False, "description": "quality: " + str(gated["reason"]), "via": "quality", "media": logged}
++    body = gated["body"]
++    photo = gated["photo"]
++    preview = False
+     import requests
+     base = f"https://api.telegram.org/bot{token}"
+     split = bool(photo) and plain_len(body) > CAPTION_MAX   # 2026-11-03 tgtone2: photo, then the text message
+@@ -626,19 +668,24 @@
+                 d = requests.post(f"{base}/sendPhoto", json=dict(data, photo=photo), timeout=30).json()
+             if d.get("ok") and not split:
+                 d["via"] = "photo"
++                d["media"] = logged
+                 return d
+             if d.get("ok"):
+                 pid = (d.get("result") or {}).get("message_id")
+-                d2 = send(token, chat, body, parse_mode, preview=preview)
++                checked = dict(meta, quality_checked=True)
++                checked.pop("seen_records", None)
++                d2 = send(token, chat, body, parse_mode, preview=preview, quality_item=checked, media=logged)
+                 d2["via"] = "photo+" + str(d2.get("via"))
+                 d2["photo_message_id"] = pid
++                d2["media"] = logged
+                 return d2
+             log.warning("sendPhoto failed (%s): %s -> text fallback", chat, str(d.get("description"))[:160])
+         except Exception as e:
+             log.warning("sendPhoto error (%s): %s -> text fallback", chat, type(e).__name__)
+     if quote and not photo and (quote.get("chat") and quote.get("message_id") or quote.get("url")):
+-        dq = send_quoted(base, chat, body, parse_mode, quote)
++        dq = send_quoted(base, chat, body, parse_mode, quote, preview=preview)
+         if dq.get("ok"):
++            dq["media"] = logged
+             return dq
+     payload = dict(send_params(chat), text=body, disable_web_page_preview=not preview)   # 2026-11-05 anncap
+     if parse_mode:
+@@ -651,11 +698,12 @@
+         payload = dict(send_params(chat), text=plain_text(body, keep_links=True), disable_web_page_preview=not preview)
+         d = requests.post(f"{base}/sendMessage", json=payload, timeout=20).json()
+         d["via"] = "text-plain"
++    d["media"] = logged
+     return d
+ 
+ 
+ 
+-def send_quoted(base: str, chat: str, body: str, parse_mode: str | None, q: dict) -> dict:
++def send_quoted(base: str, chat: str, body: str, parse_mode: str | None, q: dict, preview: bool = False) -> dict:
+     """2026-11-03 tgquote (owner: "인용해서 생각 재미나게"): our take posted as a Bot API *external reply* to the source
+     channel post (reply_parameters.chat_id = @source): Telegram shows the source channel + quoted text above our text,
+     tap -> original post. Tries with an exact quote snippet, then without; then the source post as a link preview
+@@ -683,7 +731,7 @@
+             log.warning("quoted send (%s, %s) failed: %s", chat, via, str(d.get("description"))[:160])
+             if via == "quote" and not re.search(r"quote", str(d.get("description") or ""), re.I):
+                 break   # not a quote-text mismatch -> the plain external reply would fail the same way
+-    if q.get("url"):
++    if preview and q.get("url"):
+         d = requests.post(f"{base}/sendMessage", json=dict(p0, link_preview_options={
+             "url": q["url"], "show_above_text": True, "prefer_small_media": True}), timeout=20).json()
+         if d.get("ok"):
+--- a/app/services/tg_route.py
++++ b/app/services/tg_route.py
+@@ -341,15 +341,20 @@
+         return {"ok": False, "description": "no bot token"}
+     try:
+         d = tg_post.send(tok, target, body, parse_mode, photo, quote=meta.get("quote"),
+-                         preview=not meta.get("no_preview"))   # 2026-11-05 anncap
++                         preview=False, quality_item=meta, media=meta.get("media") if isinstance(meta.get("media"), dict) else None)
+     except Exception as e:
+         d = {"ok": False, "description": f"{type(e).__name__}: {str(e).replace(tok, '***')[:160]}"}
+     mid = str((d.get("result") or {}).get("message_id") or "") if d.get("ok") else ""
++    media = d.get("media") if isinstance(d.get("media"), dict) else {}
+     log_sent({"at": db.iso(db.now_kst()), "channel": target, "lane": lane, "kind": kind_of(lane),
+               "entity": str(meta.get("entity") or "").lower()[:40], "topic": meta.get("topic"),
+               "ref": str(meta.get("ref") or "")[:200], "message_id": mid, "ok": bool(d.get("ok")),
+               "error": None if d.get("ok") else str(d.get("description"))[:160], "via": d.get("via"),
+-              "url": str(meta.get("url") or "")[:300], "headline": str(meta.get("headline") or "")[:120]})
++              "url": str(meta.get("url") or "")[:300], "headline": str(meta.get("headline") or "")[:120],
++              "media_url": media.get("url"), "media_provenance": media.get("provenance"),
++              "media_rejections": media.get("rejected"),
++              "source_text": str(meta.get("source_text") or "")[:500],
++              "story_keys": meta.get("story_keys")})
+     if d.get("ok") and meta.get("item_id"):
+         record_msg(meta["item_id"], target, mid)
+     return d
+@@ -428,6 +433,39 @@
+         tp = topic(x)
+     tg = list(targets_) if targets_ is not None else targets(lane, tp, importance, first_party)
+     out = {"ok": False, "topic": tp, "targets": tg, "sent": {}, "queued": [], "skipped": {}}
++    # 2026-11-07 quality: gate before curate/queue so a joke or bad image is not saved for later.
++    from ..quality.tg_news import apply_send_gate, media_log, story_keys
++    src = ""
++    if isinstance(x, str):
++        src = x
++    elif isinstance(x, dict):
++        src = "\n".join(str(x.get(k) or "") for k in ("source_text", "text", "primary_text", "headline", "title", "summary", "quote_text") if x.get(k))
++    supplied_entry = entry
++    entry = entry or {}
++    source_text = entry.get("source_text") or src
++    qmeta = {"headline": headline or entry.get("headline"), "url": url or entry.get("url"), "source_text": source_text,
++             "quoted_text": entry.get("quoted_text"), "author": entry.get("author") or entity, "entity": entity,
++             "classification": entry.get("classification") or entry.get("tier"), "lane": lane, "ref": ref,
++             "media": entry.get("media") if isinstance(entry.get("media"), dict) else None,
++             "extra_urls": entry.get("extra_urls"), "aggregator": entry.get("aggregator"),
++             "author_role": entry.get("author_role"), "official": bool(first_party), "first_party": bool(first_party),
++             "kind": entry.get("kind")}
++    try:
++        from . import tg_timing
++        seen = [e for e in sent_log() if e.get("ok")] + list(tg_timing.queue())
++    except Exception:
++        seen = [e for e in sent_log() if e.get("ok")]
++    qmeta["seen_records"] = seen
++    qmeta["story_keys"] = story_keys(qmeta)
++    gated = apply_send_gate(body, photo, qmeta)
++    out["quality"] = {"reason": gated.get("reason"), "media": media_log(gated.get("media")), "verdict": gated.get("verdict")}
++    if gated["drop"]:
++        out["reason"] = "quality: " + str(gated["reason"])
++        return out
++    body = gated["body"]
++    photo = gated["photo"]
++    qmeta["media"] = media_log(gated.get("media"))
++    qmeta["no_preview"] = True
+     if not tg:
+         out["reason"] = f"no target for topic {tp!r} (lane {lane}, importance {importance})"
+         return out
+@@ -437,15 +475,20 @@
+     if not ok_t:
+         out["reason"] = "tg curate: " + "; ".join(f"{k}: {v}" for k, v in skipped.items())[:300]
+         return out
+-    meta = {"entity": entity, "topic": tp, "ref": ref, "item_id": item_id, "url": url, "headline": headline}
++    meta = {"entity": entity, "topic": tp, "ref": ref, "item_id": item_id, "url": url, "headline": headline,
++            "source_text": source_text, "quoted_text": qmeta.get("quoted_text"), "author": qmeta.get("author"),
++            "classification": qmeta.get("classification"), "lane": lane, "media": qmeta.get("media"),
++            "no_preview": True, "story_keys": qmeta.get("story_keys"), "extra_urls": qmeta.get("extra_urls"),
++            "aggregator": qmeta.get("aggregator"), "author_role": qmeta.get("author_role"),
++            "first_party": bool(first_party)}
+     if quote:
+         meta["quote"] = quote   # 2026-11-03 tgquote: forward lane external reply to the source post
+-    if entry is not None and kv_log and not dry_run:
+-        entry["ref"] = ref
+-        entry["topic"] = tp
+-        entry["sent"] = {}
++    if supplied_entry is not None and kv_log and not dry_run:
++        supplied_entry["ref"] = ref
++        supplied_entry["topic"] = tp
++        supplied_entry["sent"] = {}
+         lg = db.kv_get(kv_log, []) or []
+-        lg.append(entry)
++        lg.append(supplied_entry)
+         db.kv_set(kv_log, lg[-300:])
+     for t in ok_t:
+         when = tg_timing.decide(lane, t, now, urgent=urgent, importance=int(importance or 0),
+--- a/app/services/tg_storyline.py
++++ b/app/services/tg_storyline.py
+@@ -70,7 +70,8 @@
+   one, never "A는 ~했다. B는 ~했다. C는 ~했다". The subject must be named once.
+   Use ONLY facts in the evidence texts; no numbers that are not in the evidence; no investment advice; never invent
+   what someone said; no URLs.
+-- Voice: 음슴체/반말 mix ("~함", "~임", "~인 듯", "~는 셈", "~다", noun), varied endings. BANNED summary-report verbs:
++- Voice: dry Korean. One line says what it is, the next says why it matters and ends with ~다.
++  Never ~임, ~함, ~네, ~요, or ~했음. BANNED summary-report verbs:
+   짚었다, 설명했다, 지적했다, 전망했다, 강조했다, 밝혔다, 언급했다, 덧붙였다, 소개했다, 주장했다, 평가했다, 분석했다,
+   내다봤다. Never self-talk endings (~네/~군/~구나/~느낌/~요) or vague lines ("~하는 방향", "새로운 흐름"),
+   no translationese ("~를 통해", "~에 따르면", "또한", "한편"). Never mention the evidence/input itself ("제공된",
+@@ -542,18 +543,25 @@
+ 
+ 
+ 
+-def photo_for(ev: dict, body: str, c: dict) -> str | None:
++def media_for(ev: dict) -> dict:
++    """Subject post only. Quoted-post images are not a fallback."""
+     from . import tg_post
+-    if not c["photo"] or tg_post.plain_len(body) > 1000:
+-        return None
+-    sp = ev["post"]
++    sp = ev.get("post") or {}
++    raw = sp.get("raw") if isinstance(sp.get("raw"), dict) else None
+     try:
+-        p = tg_post.fx_media(sp["url"])
+-        if not p and (sp["raw"].get("quote") or {}).get("url"):
+-            p = tg_post.fx_media(sp["raw"]["quote"]["url"])
+-        return p or None
++        return tg_post.decide_media(sp.get("url") or "", tweet=raw, story_text=sp.get("text") or "",
++                                    fetch=raw is None)
+     except Exception:
++        return {"url": None, "provenance": None, "approved": False, "preview": False, "rejected": [],
++                "reason": "media_decision_error"}
++
++
++def photo_for(ev: dict, body: str, c: dict) -> str | None:
++    from . import tg_post
++    if not c["photo"] or tg_post.plain_len(body) > 1000:
+         return None
++    decision = media_for(ev)
++    return decision.get("url") if decision.get("approved") else None
+ 
+ 
+ def target_for(tp: str | None) -> str | None:
+@@ -564,7 +572,14 @@
+ 
+ def dup(ev: dict, target: str, now: datetime, c: dict) -> str | None:
+     from . import tg_route
++    from ..quality.tg_news import story_keys, duplicate_reason
+     subj, sid = ev["subject"], ev["post"]["id"]
++    quote = (ev["post"].get("raw") or {}).get("quote") if isinstance(ev["post"].get("raw"), dict) else {}
++    keys = story_keys({"url": ev["post"].get("url"), "source_text": ev["post"].get("text"),
++                       "quoted_text": (quote or {}).get("text"), "extra_urls": [(quote or {}).get("url")]})
++    same = duplicate_reason(keys, [e for e in tg_route.sent_log() if e.get("ok")])
++    if same:
++        return same
+     pcut = db.iso(now - timedelta(hours=float(c["person_hours"])))
+     for x in db.kv_get(KV_LOG, []) or []:
+         if sid and sid in str(x.get("ref", "")):
+@@ -700,7 +715,9 @@
+         f = tg_post.ensure_comment({"comment": j.get("comment") or "", "headline": ev["post"]["text"][:60]},
+                                    ev["post"]["text"])
+         body = render(f.get("comment") or "", j["lines"], ev)
+-        photo = photo_for(ev, body, c)
++        decision = media_for(ev) if c["photo"] and tg_post.plain_len(body) <= 1000 else {
++            "url": None, "approved": False, "provenance": None, "rejected": [], "preview": False}
++        photo = decision.get("url") if decision.get("approved") else None
+         d = dup(ev, target, now, c)
+         pick = dict(info, ok=d is None, reason=why if d is None else "dup: " + d, topic=tp, target=target,
+                     text=body, photo=photo)
+@@ -717,8 +734,11 @@
+                 out["posted"][target] = {"reason": "tg curate: " + why_c}
+                 break
+             ref = f"story:{subj}:{ev['post']['id']}"
++            raw = ev["post"].get("raw") if isinstance(ev["post"].get("raw"), dict) else {}
+             entry = {"at": db.iso(now), "subject": subj, "url": ev["post"]["url"], "views": ev["post"]["views"],
+-                     "vph": ev["vph"], "interactions": list(ev["inter"].keys()), "text": body}
++                     "vph": ev["vph"], "interactions": list(ev["inter"].keys()), "text": body,
++                     "source_text": ev["post"].get("text") or "", "author": subj, "media": decision,
++                     "quoted_text": str((raw.get("quote") or {}).get("text") or "")}
+             res = tg_route.deliver("storyline", body, targets_=[target], tp=tp, photo=photo, parse_mode="HTML",
+                                    entity=subj, ref=ref, kv_log=KV_LOG, entry=entry, url=ev["post"]["url"],
+                                    headline=ev["post"]["text"].split("\n")[0][:100], now=now)
+--- a/app/services/tg_timing.py
++++ b/app/services/tg_timing.py
+@@ -180,6 +180,17 @@
+             if not dry_run:
+                 _drop(x, "already sent", now)
+             continue
++        # 2026-11-07: legacy rows skipped text/media checks when they were queued. Re-check before send.
++        from ..quality.tg_news import vet_queued
++        others = [y for y in q if y.get("qid") != x.get("qid")]
++        seen = [e for e in tg_route.sent_log() if e.get("ok")] + others
++        vetted = vet_queued(x, seen)
++        if vetted["drop"]:
++            out["dropped"].append((x.get("ref"), t, vetted["reason"]))
++            if not dry_run:
++                _drop(x, "quality: " + str(vetted["reason"]), now)
++            continue
++        x = dict(x, body=vetted["body"], photo=vetted["photo"], media=vetted.get("media"), no_preview=True)
+         if done_t.get(t, 0) >= int(c["per_flush"]) or (c["enabled"] and
+                                                        decide(x.get("lane", ""), t, now, bool(x.get("urgent")),
+                                                               int(x.get("importance") or 0),
+@@ -202,7 +213,10 @@
+             out["would_send"].append((x.get("lane"), x.get("ref"), t))
+             keep.append(x)
+             continue
+-        meta = {k: x.get(k) for k in ("entity", "topic", "ref", "item_id", "url", "headline", "quote")}
++        meta = {k: x.get(k) for k in ("entity", "topic", "ref", "item_id", "url", "headline", "quote",
++                                      "source_text", "quoted_text", "author", "classification", "media", "story_keys",
++                                      "extra_urls", "lane")}
++        meta["no_preview"] = True
+         r = tg_route._deliver_one(x.get("lane", ""), t, x.get("body", ""), x.get("parse_mode") or "HTML",
+                                   x.get("photo"), meta)
+         tg_route.lane_log_set(x.get("kv_log"), x.get("ref"), t, tg_route._res_str(r))
+--- /dev/null
++++ b/app/quality/__init__.py
+@@ -0,0 +1,4 @@
++"""Owner-authorized quality gates for Telegram news, English X drafts, and status.
++
++These modules are pure: they do not post, browse, or read credentials.
++"""
+--- /dev/null
++++ b/app/quality/tg_news.py
+@@ -0,0 +1,804 @@
++"""Telegram newsworthiness, grounding, dedup, Korean style, and media fail-closed.
++
++Network and Telegram sends stay in the service modules. This module only decides.
++Author or employer fame never adds evidence.
++"""
++from __future__ import annotations
++
++import re
++from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
++
++# Org accounts. People who work there are intentionally absent: fame is not a source.
++OFFICIAL_ORG_HANDLES = {
++    "openai", "openaidevs", "chatgptapp", "anthropicai", "claudeai", "cursor_ai",
++    "github", "binance", "coinbase", "okx", "krakenfx", "bybit_official",
++    "upbit_official", "federalreserve", "secgov",
++}
++OFFICIAL_HOST_SUFFIXES = (
++    "openai.com", "anthropic.com", "cursor.com", "github.com", "x.ai",
++    "blog.google", "binance.com", "coinbase.com", "okx.com", "kraken.com",
++    "federalreserve.gov", "sec.gov",
++)
++GAME_HOSTS = {"poteto.com", "itch.io", "crazygames.com", "poki.com"}
++SECRET_QUERY_KEYS = {"token", "key", "secret", "sig", "signature", "auth", "password", "pass", "cookie", "access_token"}
++TRACKING_QUERY_KEYS = SECRET_QUERY_KEYS | {
++    "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content", "utm_id",
++    "ref", "ref_src", "s", "si", "fbclid", "gclid", "mc_cid", "mc_eid",
++}
++
++THUMB_URL_RE = re.compile(
++    r"amplify_video_thumb|ext_tw_video_thumb|tweet_video_thumb|video_thumb|pu/img/tweet_video",
++    re.I,
++)
++PLACEHOLDER_URL_RE = re.compile(
++    r"placeholder|default_profile_images|spacer|blank\.(?:gif|png)|/emoji/|1x1",
++    re.I,
++)
++STATUS_RE = re.compile(
++    r"(?:https?://)?(?:www\.)?(?:x|twitter|fxtwitter|vxtwitter|fixupx)\.com/([A-Za-z0-9_]{1,15})/status(?:es)?/(\d+)",
++    re.I,
++)
++URL_RE = re.compile(r"https?://[^\s<>\"')\]]+", re.I)
++MENTION_RE = re.compile(r"(?<![A-Za-z0-9_@])@([A-Za-z0-9_]{2,15})")
++HANGUL_RE = re.compile(r"[가-힣]")
++EMOJI_RE = re.compile(
++    "["
++    "\U0001F000-\U0001FAFF"
++    "\U00002600-\U000027BF"
++    "\U0001F1E6-\U0001F1FF"
++    "\u2190-\u21FF"
++    "\u2B00-\u2BFF"
++    "\uFE0F"
++    "\u200D"
++    "]+",
++    flags=re.UNICODE,
++)
++BOLD_RE = re.compile(r"</?(?:b|strong|u|i)>|\*\*", re.I)
++TRIVIAL_RE = re.compile(
++    r"get me out of the basement|it'?s friday|happy friday|just a joke|shitpost|"
++    r"for (?:the )?laughs|\bmini[- ]?game\b|\bbrowser game\b|\bplay (?:this|the) game\b|"
++    r"장난(?:으로|임|이다)?|개그|웃기려고|드립(?:이다|임)?",
++    re.I,
++)
++PR_ONLY_RE = re.compile(
++    r"\b(?:excited to announce|thrilled to|proud to partner|we(?:'|’)re hiring|check out my)\b|"
++    r"기대(?:된다|해주세요)|많은 관심",
++    re.I,
++)
++NEWS_RE = re.compile(
++    r"\b(?:introduc\w+|launch\w*|ship(?:s|ped|ping)?|releas\w+|announc\w+|available|roll(?:ing|ed) out|"
++    r"open[- ]sources?|priced?|benchmark|cve-\d+|exploit|hack(?:ed)?|drained|stolen|delist\w*|"
++    r"will list|lists|listing|regulat\w+|acqui(?:re|res|red)|raises?|cuts?|hikes?|holds?|"
++    r"unveils?|adds? support|now supports|can now)\b|"
++    r"출시|공개|발표|상장|해킹|규제|금리|지원(?:한다|된다)|쓸 수 있다",
++    re.I,
++)
++PRACTICAL_RE = re.compile(
++    r"\b(?:you can|lets you|so you can|can now|without having to|instead of)\b|"
++    r"수 있다|하면 된다|쓸 수 있다|물어보면|이어서",
++    re.I,
++)
++CONCRETE_RE = re.compile(
++    r"\d|v\d+|gpt-?\d|claude|cursor|muse|voice|https?://|\$[A-Za-z]{2,}|\b[A-Z][A-Za-z0-9]{2,}\b|"
++    r"[가-힣]{2,}",
++)
++AI_CLAIM_RE = re.compile(
++    r"openai|오픈\s*AI|오픈AI|gpt-?\d|에이전트|ai[- ]made|made with ai|인공지능|모델(?:을|를)? 출시",
++    re.I,
++)
++AI_EVIDENCE_RE = re.compile(
++    r"openai|gpt-?\d|anthropic|claude|\bagent\b|\bmodel\b|\bllm\b|\bai\b|인공지능|에이전트",
++    re.I,
++)
++FIRSTHAND_RE = re.compile(
++    r"써\s*봤|직접\s*(?:써|해\s*봤)|내가\s*써|테스트해\s*봤|내가\s*해\s*보|내가 써본|"
++    r"\b(?:i|we)\s+(?:tried|tested|used)\b|in my testing",
++    re.I,
++)
++PROMO_RE = re.compile(
++    r"airdrop|referral code|giveaway|whitelist|use my (?:code|link)|retweet and follow|"
++    r"에어드랍|레퍼럴|초대\s*코드",
++    re.I,
++)
++REPORT_RE = re.compile(
++    r"(?:짚었|설명했|지적했|전망했|강조했|밝혔|언급했|덧붙였|소개했|평가했|주장했|분석했|내다봤)"
++    r"(?:다|음|고|으며|는데|던)?(?=$|[\s.,!?])"
++)
++BANNED_ENDING_RE = re.compile(
++    r"(?:(?<!동)(?<!아테)네|임|함|요|죠|습니다|입니다|군요|네요|(?:했|였|있|없|되|된|같|렸|냈|봤)음)$"
++)
++LAST_WORD_ALLOW = {"포함", "위험", "다음", "마음", "처음", "중심", "핵심", "책임", "방침", "동네"}
++LINK_LINE_RE = re.compile(r"^(?:원문 보기|원문|https?://\S+|@?[A-Za-z0-9_]{1,15} 원문)$")
++PRIVILEGED_TIER_RE = re.compile(r"top_tier|:update\b|/update\b", re.I)
++PRIVATE_TG_RE = re.compile(
++    r"https?://t\.me/(?:c/\d+/\d+|\+[A-Za-z0-9_-]+|joinchat/[A-Za-z0-9_-]+)",
++    re.I,
++)
++PUBLIC_TG_RE = re.compile(r"https?://t\.me/([A-Za-z][A-Za-z0-9_]{3,})/(\d+)/?(?:[?#].*)?$", re.I)
++PRIVATE_CHANNEL_RE = re.compile(r"^-?\d|^\d+#|t\.me/c/", re.I)
++
++_ENFORCEMENT = {"status": "not_applied", "observed": False}
++
++
++def set_enforcement_attestation(status: str | None, *, observed: bool = False) -> None:
++    """Record a sender-process attestation. Missing or unobserved stays not_applied."""
++    if status is None:
++        _ENFORCEMENT["status"] = "not_applied"
++        _ENFORCEMENT["observed"] = False
++        return
++    if status not in {"not_applied", "prepared", "testing", "live"}:
++        raise ValueError("unknown enforcement status")
++    _ENFORCEMENT["status"] = status
++    _ENFORCEMENT["observed"] = bool(observed)
++
++
++def enforcement_status() -> str:
++    if not _ENFORCEMENT.get("observed"):
++        return "not_applied"
++    return str(_ENFORCEMENT.get("status") or "not_applied")
++
++
++def _host(url: str) -> str:
++    try:
++        host = urlsplit(url).hostname or ""
++    except Exception:
++        return ""
++    return host.lower().removeprefix("www.")
++
++
++def _clean_query(url: str) -> str:
++    parts = urlsplit(url)
++    kept = []
++    for k, v in parse_qsl(parts.query, keep_blank_values=True):
++        if k.lower() in TRACKING_QUERY_KEYS:
++            continue
++        kept.append((k, v))
++    path = parts.path.rstrip("/") or "/"
++    if path == "/":
++        path = ""
++    return urlunsplit((parts.scheme.lower(), (parts.hostname or "").lower(), path, urlencode(kept), ""))
++
++
++def sanitize_source_url(url: str | None) -> str | None:
++    """Credential-free https URL, or None. Userinfo and secret query keys are removed."""
++    raw = str(url or "").strip()
++    if not raw:
++        return None
++    raw = raw.rstrip(").,]}>\"'")
++    if raw.startswith("http://"):
++        return None
++    if not raw.startswith("https://"):
++        return None
++    parts = urlsplit(raw)
++    if parts.username or parts.password:
++        raw = urlunsplit(("https", parts.hostname or "", parts.path, parts.query, ""))
++        parts = urlsplit(raw)
++    if not parts.hostname:
++        return None
++    return _clean_query(urlunsplit(("https", parts.hostname, parts.path, parts.query, "")))
++
++
++def public_telegram_url(url: str | None) -> str | None:
++    """https://t.me/<publichandle>/<id> only. Private links return None."""
++    raw = str(url or "").strip()
++    if not raw or PRIVATE_TG_RE.search(raw):
++        return None
++    m = PUBLIC_TG_RE.search(raw)
++    if not m:
++        return None
++    return f"https://t.me/{m.group(1)}/{m.group(2)}"
++
++
++def redact_channel(channel: str | None) -> str | None:
++    text = str(channel or "").strip()
++    if not text:
++        return None
++    if PRIVATE_CHANNEL_RE.search(text) or PRIVATE_TG_RE.search(text):
++        return "private group"
++    if text.startswith("@"):
++        return text
++    pub = public_telegram_url(text)
++    if pub:
++        return "@" + pub.split("/")[3]
++    return text
++
++
++def status_id(url: str | None) -> str | None:
++    m = STATUS_RE.search(str(url or ""))
++    return m.group(2) if m else None
++
++
++def status_handle(url: str | None) -> str | None:
++    m = STATUS_RE.search(str(url or ""))
++    return m.group(1).lower() if m else None
++
++
++def find_urls(text: str) -> list[str]:
++    return [m.group(0) for m in URL_RE.finditer(text or "")]
++
++
++def canonical_external(url: str) -> str | None:
++    clean = sanitize_source_url(url)
++    if not clean:
++        return None
++    if status_id(clean):
++        return None
++    host = _host(clean)
++    if host in {"t.co", "x.com", "twitter.com", "fxtwitter.com", "vxtwitter.com", "fixupx.com"}:
++        return None
++    return clean
++
++
++def _norm_claim(text: str) -> str:
++    t = re.sub(r"https?://\S+", " ", str(text or "").lower())
++    t = re.sub(r"[^0-9a-z가-힣\s]", " ", t)
++    return re.sub(r"\s+", " ", t).strip()
++
++
++def story_keys(item: dict | None) -> list[str]:
++    """Identity ignores the posting account and which image was attached."""
++    item = item or {}
++    keys: list[str] = []
++    blobs = [item.get("url"), item.get("source_text"), item.get("text"), item.get("quoted_text"),
++             item.get("headline"), item.get("ref"), item.get("body")]
++    for extra in item.get("extra_urls") or []:
++        blobs.append(extra)
++    for blob in blobs:
++        for url in find_urls(str(blob or "")) + ([str(blob)] if str(blob or "").startswith("http") else []):
++            sid = status_id(url)
++            if sid:
++                keys.append(f"status:{sid}")
++                continue
++            ext = canonical_external(url)
++            if ext:
++                keys.append(f"url:{ext}")
++    if item.get("story_id"):
++        keys.append("id:" + str(item["story_id"])[:120])
++    claim_src = item.get("claim") or item.get("source_text") or item.get("headline") or ""
++    claim = _norm_claim(str(claim_src))
++    if len(claim) >= 24 and re.search(r"[a-z0-9]{6,}|[가-힣]{6,}", claim):
++        keys.append("claim:" + claim[:180])
++    return list(dict.fromkeys(keys))
++
++
++def duplicate_reason(keys: list[str], records: list[dict] | None, *, ignore_ref: str | None = None,
++                     ignore_qid: str | None = None) -> str | None:
++    if not keys:
++        return None
++    want = set(keys)
++    for rec in records or []:
++        if rec.get("ok") is False:
++            continue
++        if ignore_qid and rec.get("qid") and rec.get("qid") == ignore_qid:
++            continue
++        if ignore_ref and rec.get("ref") and rec.get("ref") == ignore_ref and not rec.get("ok"):
++            continue
++        have = set(rec.get("story_keys") or [])
++        have.update(story_keys(rec))
++        hit = want & have
++        if hit:
++            return "duplicate story via " + sorted(hit)[0]
++    return None
++
++
++def _kind_from_url(url: str, declared: str, origin: str) -> str:
++    if THUMB_URL_RE.search(url or ""):
++        return "gif_thumbnail" if "gif" in declared else "video_thumbnail"
++    if PLACEHOLDER_URL_RE.search(url or ""):
++        return "placeholder"
++    if origin == "quote":
++        return "quoted_photo"
++    if declared in {"video_thumbnail", "gif_thumbnail", "quoted_photo", "own_photo", "placeholder", "generated_card"}:
++        return declared
++    if declared in {"video", "animated_gif", "gif"}:
++        return "gif_thumbnail" if "gif" in declared else "video_thumbnail"
++    if declared == "photo":
++        return "own_photo"
++    return "unknown"
++
++
++def _add_candidate(out: list[dict], seen: set[str], url: str | None, kind: str, origin: str, alt: str = "") -> None:
++    url = str(url or "").strip()
++    if not url or url in seen:
++        return
++    seen.add(url)
++    out.append({
++        "url": url,
++        "kind": _kind_from_url(url, kind, origin),
++        "origin": origin,
++        "alt": str(alt or ""),
++        "verified_relevant": False,
++    })
++
++
++def candidates_from_fx(tweet: dict | None, origin: str = "original") -> list[dict]:
++    tweet = tweet or {}
++    med = tweet.get("media") or {}
++    out: list[dict] = []
++    seen: set[str] = set()
++    for photo in med.get("photos") or []:
++        if isinstance(photo, dict):
++            _add_candidate(out, seen, photo.get("url"), "own_photo", origin,
++                           photo.get("alt_text") or photo.get("alt") or "")
++    for video in list(med.get("videos") or []) + list(med.get("gifs") or []) + list(med.get("animated_gifs") or []):
++        if not isinstance(video, dict):
++            continue
++        declared = "gif_thumbnail" if "gif" in str(video.get("type") or "").lower() else "video_thumbnail"
++        _add_candidate(out, seen, video.get("thumbnail_url") or video.get("preview_image_url") or video.get("url"),
++                       declared, origin, video.get("alt_text") or "")
++    for item in med.get("all") or []:
++        if not isinstance(item, dict):
++            continue
++        typ = str(item.get("type") or "").lower()
++        if typ in {"video", "gif", "animated_gif"}:
++            declared = "gif_thumbnail" if "gif" in typ else "video_thumbnail"
++            _add_candidate(out, seen, item.get("thumbnail_url") or item.get("preview_image_url") or item.get("url"),
++                           declared, origin, item.get("alt_text") or "")
++        elif typ == "photo":
++            _add_candidate(out, seen, item.get("url"), "own_photo", origin, item.get("alt_text") or "")
++    quote = tweet.get("quote") if origin != "quote" else None
++    if isinstance(quote, dict) and quote.get("media"):
++        for cand in candidates_from_fx({"media": quote.get("media")}, "quote"):
++            if cand["url"] not in seen:
++                seen.add(cand["url"])
++                out.append(cand)
++    return out
++
++
++def candidates_from_post(post: dict | None, origin: str = "original") -> list[dict]:
++    """Structured attachments only. Bare URL lists are unknown and fail closed later."""
++    if not isinstance(post, dict):
++        return []
++    if isinstance(post.get("media"), dict):
++        return candidates_from_fx(post, origin)
++    media = post.get("media")
++    if media is None:
++        media = (post.get("extended_entities") or {}).get("media")
++    out: list[dict] = []
++    seen: set[str] = set()
++    if not isinstance(media, list):
++        return out
++    for item in media:
++        if isinstance(item, str):
++            _add_candidate(out, seen, item, "unknown", origin)
++            continue
++        if not isinstance(item, dict):
++            continue
++        typ = str(item.get("type") or "")
++        url = item.get("url") or item.get("media_url_https") or item.get("preview_image_url") or item.get("thumbnail_url")
++        _add_candidate(out, seen, url, typ or "unknown", origin, item.get("alt_text") or item.get("alt") or "")
++    return out
++
++
++def _tokens(text: str) -> set[str]:
++    stop = {"this", "that", "with", "from", "your", "have", "will", "just", "like", "about", "into",
++            "they", "them", "what", "should", "could", "image", "photo", "video", "screenshot", "http", "https"}
++    words = re.findall(r"[a-z]{4,}|[가-힣]{2,}", (text or "").lower())
++    return {w for w in words if w not in stop}
++
++
++def alt_supports(alt: str, story: str) -> bool:
++    left, right = _tokens(alt), _tokens(story)
++    if not left or not right:
++        return False
++    for a in left:
++        for b in right:
++            short, long = (a, b) if len(a) <= len(b) else (b, a)
++            if len(short) >= 4 and (short == long or long.startswith(short)):
++                return True
++    return False
++
++
++def _reject(url: str, kind: str, reason: str) -> dict:
++    return {"url": sanitize_source_url(url) or (url if url.startswith("/") or "tweetcap" in url else None),
++            "kind": kind, "reason": reason}
++
++
++def choose_media(candidates: list[dict] | None, *, story_text: str = "", logo_fn=None,
++                 link: str = "", official_capture_handles: set[str] | None = None) -> dict:
++    """Pick an official capture or a verified relevant demo. Otherwise text, preview off.
++
++    Quote images and unchecked video/gif thumbnails are recorded and never selected.
++    A racetrack (or any other) video frame is not a demo unless verification says so.
++    Official tweet capture is offered only for a logo/brand card, not for a rejected video frame:
++    a screenshot of that frame would republish the same unrelated image.
++    """
++    rejected = []
++    handles = {h.lower() for h in (official_capture_handles or set())}
++    handle = status_handle(link)
++    allow_capture = False
++    chosen = None
++    for cand in candidates or []:
++        url = str(cand.get("url") or "")
++        kind = _kind_from_url(url, str(cand.get("kind") or ""), str(cand.get("origin") or "original"))
++        origin = cand.get("origin") or "original"
++        alt = str(cand.get("alt") or "")
++        if origin == "quote" or kind == "quoted_photo":
++            rejected.append({"url": sanitize_source_url(url), "kind": "quoted_photo", "reason": "quoted_post_image"})
++            continue
++        if kind in {"video_thumbnail", "gif_thumbnail"} or THUMB_URL_RE.search(url):
++            reason = "unchecked_video_thumbnail" if kind != "gif_thumbnail" else "unchecked_video_thumbnail"
++            if not cand.get("verified_relevant"):
++                rejected.append({"url": sanitize_source_url(url), "kind": kind, "reason": reason})
++                continue
++        if kind in {"placeholder", "generated_card", "unknown"} or PLACEHOLDER_URL_RE.search(url):
++            rejected.append({"url": sanitize_source_url(url), "kind": kind or "placeholder",
++                             "reason": "placeholder" if kind != "unknown" else "provenance_missing"})
++            continue
++        if handle and handle in handles and kind == "own_photo":
++            rejected.append({"url": sanitize_source_url(url), "kind": kind, "reason": "logo_or_placeholder"})
++            allow_capture = True
++            continue
++        verified = bool(cand.get("verified_relevant"))
++        if not verified and alt and story_text and alt_supports(alt, story_text):
++            verified = True
++        if not verified:
++            reason = "unrelated_photo" if alt else "unverified_relevance"
++            rejected.append({"url": sanitize_source_url(url), "kind": kind or "own_photo", "reason": reason})
++            continue
++        if logo_fn is not None:
++            try:
++                is_logo = bool(logo_fn(url))
++            except Exception:
++                is_logo = False
++            if is_logo:
++                rejected.append({"url": sanitize_source_url(url), "kind": kind, "reason": "logo_or_placeholder"})
++                allow_capture = True
++                continue
++        if chosen is None:
++            chosen = {"url": sanitize_source_url(url) or url, "provenance": "verified_demo", "kind": "own_photo"}
++        continue
++    if any(row.get("reason") == "unchecked_video_thumbnail" for row in rejected):
++        # A tweet screenshot would republish the same unchecked frame.
++        allow_capture = False
++    if chosen and chosen.get("url"):
++        return {"url": chosen["url"], "provenance": "verified_demo", "approved": True, "preview": False,
++                "rejected": rejected, "allow_official_capture": False, "reason": None}
++    return {"url": None, "provenance": None, "approved": False, "preview": False, "rejected": rejected,
++            "allow_official_capture": allow_capture, "reason": (rejected[0]["reason"] if rejected else "no_supported_media")}
++
++
++def gate_photo_url(url: str | None, *, provenance: str | None = None, story_text: str = "",
++                   alt: str = "", verified_relevant: bool = False, origin: str | None = None,
++                   kind: str | None = None) -> dict:
++    """Legacy and final-send choke point. A bare URL is not provenance."""
++    raw = str(url or "").strip()
++    if not raw:
++        return {"url": None, "provenance": None, "approved": False, "preview": False, "rejected": [],
++                "allow_official_capture": False, "reason": None}
++    declared = kind or ("quoted_photo" if origin == "quote" or provenance in {"quote", "quoted_post_image"} else "unknown")
++    cand = {"url": raw, "kind": declared, "origin": origin or ("quote" if provenance in {"quote", "quoted_post_image"} else "original"),
++            "alt": alt, "verified_relevant": verified_relevant or provenance == "verified_demo"}
++    if provenance == "official_capture" and not THUMB_URL_RE.search(raw) and "quoted" not in declared:
++        return {"url": raw, "provenance": "official_capture", "approved": True, "preview": False, "rejected": [],
++                "allow_official_capture": False, "reason": None}
++    if provenance == "verified_demo":
++        cand["verified_relevant"] = True
++        cand["kind"] = "own_photo" if declared == "unknown" else declared
++    decision = choose_media([cand], story_text=story_text)
++    if provenance in {None, "", "unknown"} and decision.get("url") and not verified_relevant:
++        decision = {"url": None, "provenance": None, "approved": False, "preview": False,
++                    "rejected": [{"url": sanitize_source_url(raw), "kind": declared, "reason": "provenance_missing"}],
++                    "allow_official_capture": False, "reason": "provenance_missing"}
++    return decision
++
++
++def _author(item: dict) -> str:
++    author = str(item.get("author") or item.get("author_username") or item.get("entity") or "").lower().lstrip("@")
++    if author:
++        return author
++    return status_handle(item.get("url") or "") or ""
++
++
++def _evidence_text(item: dict) -> str:
++    return "\n".join(str(item.get(k) or "") for k in ("source_text", "quoted_text", "primary_text") if item.get(k))
++
++
++def _claim_text(item: dict) -> str:
++    return "\n".join(str(item.get(k) or "") for k in ("body", "headline", "text", "comment") if item.get(k))
++
++
++def _urls_of(item: dict, blob: str) -> list[str]:
++    urls = list(item.get("extra_urls") or [])
++    if item.get("url"):
++        urls.append(str(item["url"]))
++    urls.extend(find_urls(blob))
++    return urls
++
++
++def _official_url(urls: list[str]) -> bool:
++    for url in urls:
++        host = _host(url)
++        if not host:
++            continue
++        if any(host == suf or host.endswith("." + suf) for suf in OFFICIAL_HOST_SUFFIXES):
++            return True
++    return False
++
++
++def _game_url(urls: list[str]) -> bool:
++    return any(_host(url) in GAME_HOSTS for url in urls)
++
++
++def _substantive(text: str) -> bool:
++    if not text or not text.strip() or TRIVIAL_RE.search(text):
++        return False
++    if PROMO_RE.search(text) or PR_ONLY_RE.search(text) and not PRACTICAL_RE.search(text):
++        return False
++    if NEWS_RE.search(text) and (CONCRETE_RE.search(text) or PRACTICAL_RE.search(text)):
++        return True
++    if PRACTICAL_RE.search(text) and CONCRETE_RE.search(text):
++        return True
++    return False
++
++
++def _privileged(item: dict) -> bool:
++    blob = " ".join(str(item.get(k) or "") for k in ("classification", "tier", "category", "key", "ref"))
++    return bool(PRIVILEGED_TIER_RE.search(blob))
++
++
++def is_aggregator(item: dict) -> bool:
++    if item.get("aggregator") or item.get("discovery_only"):
++        return True
++    if str(item.get("author_role") or "").lower() in {"aggregator", "relay", "mirror"}:
++        return True
++    author = _author(item)
++    names = {str(h).lower().lstrip("@") for h in (item.get("aggregator_handles") or [])}
++    if author and author in names:
++        return True
++    try:
++        from ..services.sourcing import is_relay
++        return bool(is_relay({"author_username": author, "text": _evidence_text(item)}))
++    except Exception:
++        return False
++
++
++def assess_newsworthiness(item: dict | None) -> dict:
++    """Allow important news, product updates, and practical cases grounded in a primary source.
++
++    Aggregator copy is discovery-only. A privileged tier string is not evidence.
++    """
++    item = item or {}
++    if str(item.get("lane") or "") == "manual":
++        return {"allow": True, "reason": None, "kind": "manual", "evidence": "exempt"}
++    evidence = _evidence_text(item)
++    claim = _claim_text(item)
++    blob = evidence or claim
++    urls = _urls_of(item, "\n".join([evidence, claim, str(item.get("url") or "")]))
++    author = _author(item)
++    trivial = bool(TRIVIAL_RE.search(evidence) or TRIVIAL_RE.search(claim) or (_game_url(urls) and not _substantive(evidence)))
++    if trivial and not (_substantive(evidence) and (_official_url(urls) or author in OFFICIAL_ORG_HANDLES)):
++        return {"allow": False, "reason": "not_newsworthy_trivial", "kind": None,
++                "evidence": "source" if evidence else "missing"}
++    if PROMO_RE.search(evidence or claim):
++        return {"allow": False, "reason": "not_newsworthy_promo", "kind": None,
++                "evidence": "source" if evidence else "missing"}
++    if (PR_ONLY_RE.search(evidence or claim)) and not _substantive(evidence or ""):
++        return {"allow": False, "reason": "not_newsworthy_pr", "kind": None,
++                "evidence": "source" if evidence else "missing"}
++    if evidence and AI_CLAIM_RE.search(claim) and not AI_EVIDENCE_RE.search(evidence):
++        return {"allow": False, "reason": "invented_ai_context", "kind": None, "evidence": "source"}
++    if evidence:
++        visible = URL_RE.sub(" ", claim)
++        for number in re.findall(r"\d[\d.,]*%?", visible):
++            if number not in evidence and number.replace(",", "") not in evidence:
++                return {"allow": False, "reason": "ungrounded_number", "kind": None, "evidence": "source"}
++    if FIRSTHAND_RE.search(claim) and not FIRSTHAND_RE.search(evidence):
++        return {"allow": False, "reason": "invented_firsthand", "kind": None,
++                "evidence": "source" if evidence else "missing"}
++    if is_aggregator(item):
++        quoted_official = author in OFFICIAL_ORG_HANDLES  # aggregator's own handle is not official
++        official = _official_url(urls) or any(status_handle(u) in OFFICIAL_ORG_HANDLES for u in urls)
++        if not (official and _substantive(evidence) and not quoted_official):
++            # official status linked from the aggregator text counts; the aggregator author does not
++            if not (_official_url(urls) or any(status_handle(u) in OFFICIAL_ORG_HANDLES for u in urls)) or not _substantive(evidence):
++                return {"allow": False, "reason": "aggregator_unverified", "kind": None,
++                        "evidence": "source" if evidence else "missing"}
++    substantive = _substantive(evidence) if evidence else False
++    if evidence and not substantive:
++        return {"allow": False, "reason": "not_newsworthy", "kind": None, "evidence": "source"}
++    if not evidence:
++        if _privileged(item) or AI_CLAIM_RE.search(claim):
++            return {"allow": False, "reason": "classification_without_evidence", "kind": None, "evidence": "missing"}
++        if author and author not in OFFICIAL_ORG_HANDLES and (NEWS_RE.search(claim) or _game_url(urls)):
++            return {"allow": False, "reason": "source_text_required", "kind": None, "evidence": "missing"}
++        return {"allow": True, "reason": None, "kind": "unchecked_legacy", "evidence": "missing"}
++    officialish = author in OFFICIAL_ORG_HANDLES or _official_url(urls) or bool(item.get("official") or item.get("first_party"))
++    original = not item.get("quoted") and not item.get("is_quote")
++    if not officialish and not (original and substantive):
++        return {"allow": False, "reason": "ungrounded_claim", "kind": None, "evidence": "source"}
++    if _privileged(item) and not substantive:
++        return {"allow": False, "reason": "classification_without_evidence", "kind": None, "evidence": "source"}
++    kind = "useful_case" if item.get("kind") == "useful_case" or (PRACTICAL_RE.search(evidence) and not NEWS_RE.search(evidence)) else "product_update" if NEWS_RE.search(evidence) else "news"
++    return {"allow": True, "reason": None, "kind": kind, "evidence": "source"}
++
++
++def _content_lines(body: str) -> list[str]:
++    plain = re.sub(r"<[^>]+>", "", body or "")
++    plain = plain.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
++    lines = []
++    for raw in plain.splitlines():
++        line = re.sub(r"[ \t]{2,}", " ", raw).strip()
++        if not line or LINK_LINE_RE.match(line):
++            continue
++        lines.append(line)
++    return lines
++
++
++def _norm_line(text: str) -> str:
++    return re.sub(r"\s+", "", re.sub(r"[^\w가-힣]+", "", (text or "").lower()))
++
++
++def banned_ending(line: str) -> bool:
++    t = re.sub(r"[\s.!?~…·,'\"”’)\]]+$", "", str(line or "").strip())
++    if not t:
++        return False
++    last = t.split()[-1]
++    if last in LAST_WORD_ALLOW:
++        return False
++    return bool(BANNED_ENDING_RE.search(t))
++
++
++def prepare_korean(body: str, *, enforce: bool = True) -> dict:
++    """Headline plus a distinct ~다 why-it-matters line. Emoji and bold are removed, not rewritten."""
++    text = str(body or "")
++    sanitized: list[str] = []
++    if EMOJI_RE.search(text) or any(ch in text for ch in "🚨⚠️🛡️💰💵📑📋⛔🆕🪙🏛️📊🧾⚖️🎁💸🤖🧠✨📈📉💹📄🔎🔗👉📎💬🔥💥"):
++        text = EMOJI_RE.sub("", text)
++        for ch in "🚨⚠️🛡️💰💵📑📋⛔🆕🪙🏛️📊🧾⚖️🎁💸🤖🧠✨📈📉💹📄🔎🔗👉📎💬🔥💥":
++            text = text.replace(ch, "")
++        sanitized.append("emoji")
++    if BOLD_RE.search(text):
++        text = BOLD_RE.sub("", text)
++        sanitized.append("bold")
++    text = re.sub(r"[ \t]{2,}", " ", text)
++    if not enforce or not HANGUL_RE.search(text):
++        return {"body": text, "reject": False, "reasons": [], "sanitized": sanitized}
++    lines = _content_lines(text)
++    reasons: list[str] = []
++    if len(MENTION_RE.findall(text)) >= 2:
++        reasons.append("mention_list")
++    for line in lines:
++        if banned_ending(line):
++            reasons.append("banned_ending")
++            break
++        if REPORT_RE.search(line):
++            reasons.append("summary_report_verb")
++            break
++    if len(lines) < 2:
++        reasons.append("missing_why_it_matters")
++    else:
++        head, rest = lines[0], lines[1:]
++        if not any(re.search(r"다$", re.sub(r"[\s.!?…]+$", "", line)) for line in rest):
++            reasons.append("missing_why_it_matters")
++        if any(_norm_line(line) == _norm_line(head) for line in rest):
++            reasons.append("title_repetition")
++    return {"body": text, "reject": bool(reasons), "reasons": list(dict.fromkeys(reasons)), "sanitized": sanitized}
++
++
++def extra_comment_issues(comment: str, headline: str = "") -> list[str]:
++    """Stricter curator-line checks shared with tg_post.comment_issues."""
++    cm = str(comment or "").strip()
++    if not cm:
++        return []
++    out = []
++    parts = re.split(r"(?<=[.다요])\s+|\n", cm)
++    for part in parts:
++        if banned_ending(part):
++            out.append("comment banned ending (~임/~함/~네)")
++            break
++    if headline and _norm_line(cm) == _norm_line(headline):
++        out.append("comment repeats the headline")
++    if not re.search(r"다(?:[.!?…\s]|$)", cm) and HANGUL_RE.search(cm):
++        out.append("comment missing why-it-matters (~다)")
++    if EMOJI_RE.search(cm):
++        out.append("comment emoji")
++    if len(MENTION_RE.findall(cm)) >= 1:
++        out.append("comment mention")
++    return out
++
++
++def _item_from_parts(body: str, meta: dict | None, photo: str | None) -> dict:
++    meta = meta or {}
++    item = {
++        "body": body,
++        "headline": meta.get("headline"),
++        "url": meta.get("url"),
++        "source_text": meta.get("source_text"),
++        "quoted_text": meta.get("quoted_text"),
++        "author": meta.get("author") or meta.get("entity"),
++        "classification": meta.get("classification") or meta.get("tier"),
++        "lane": meta.get("lane"),
++        "ref": meta.get("ref"),
++        "kind": meta.get("kind"),
++        "extra_urls": meta.get("extra_urls"),
++        "aggregator": meta.get("aggregator"),
++        "author_role": meta.get("author_role"),
++        "official": meta.get("official"),
++        "first_party": meta.get("first_party"),
++        "quoted": meta.get("quoted"),
++        "photo": photo,
++    }
++    return item
++
++
++def apply_send_gate(body: str, photo: str | None = None, meta: dict | None = None) -> dict:
++    """Final send and legacy queue share this gate. Rejection drops the send; bad media becomes text."""
++    meta = dict(meta or {})
++    item = _item_from_parts(body, meta, photo)
++    if meta.get("quality_checked"):
++        verdict = {"allow": True, "reason": None, "kind": "checked", "evidence": "checked"}
++    else:
++        verdict = assess_newsworthiness(item)
++    media_in = meta.get("media") if isinstance(meta.get("media"), dict) else {}
++    decision = gate_photo_url(
++        photo,
++        provenance=media_in.get("provenance") or meta.get("media_provenance"),
++        story_text=str(item.get("source_text") or "") + "\n" + str(item.get("headline") or ""),
++        alt=str(media_in.get("alt") or ""),
++        verified_relevant=bool(media_in.get("approved") and media_in.get("provenance") == "verified_demo"),
++        origin=media_in.get("origin"),
++        kind=media_in.get("kind"),
++    )
++    if media_in.get("rejected"):
++        seen = {r.get("url") for r in decision.get("rejected") or []}
++        for row in media_in["rejected"]:
++            if row.get("url") not in seen:
++                decision.setdefault("rejected", []).append(row)
++    if not verdict["allow"]:
++        return {"drop": True, "reason": verdict["reason"], "body": body, "photo": None, "no_preview": True,
++                "media": decision, "verdict": verdict, "korean": None}
++    korean = prepare_korean(body, enforce=str(meta.get("lane") or "") != "manual")
++    if korean["reject"]:
++        return {"drop": True, "reason": "korean_style:" + ",".join(korean["reasons"]), "body": korean["body"],
++                "photo": None, "no_preview": True, "media": decision, "verdict": verdict, "korean": korean}
++    dup = None
++    if meta.get("seen_records") is not None:
++        dup = duplicate_reason(story_keys(item), meta.get("seen_records"), ignore_ref=meta.get("ref"),
++                               ignore_qid=meta.get("qid"))
++    if dup:
++        return {"drop": True, "reason": dup, "body": korean["body"], "photo": None, "no_preview": True,
++                "media": decision, "verdict": verdict, "korean": korean}
++    return {"drop": False, "reason": None, "body": korean["body"], "photo": decision.get("url") if decision.get("approved") else None,
++            "no_preview": True, "media": decision, "verdict": verdict, "korean": korean}
++
++
++def vet_queued(item: dict, seen: list[dict] | None = None) -> dict:
++    meta = {
++        "headline": item.get("headline"),
++        "url": item.get("url"),
++        "source_text": item.get("source_text"),
++        "quoted_text": item.get("quoted_text"),
++        "author": item.get("author") or item.get("entity"),
++        "entity": item.get("entity"),
++        "classification": item.get("classification") or item.get("tier"),
++        "lane": item.get("lane"),
++        "ref": item.get("ref"),
++        "qid": item.get("qid"),
++        "kind": item.get("kind"),
++        "media": item.get("media"),
++        "media_provenance": item.get("media_provenance"),
++        "seen_records": seen,
++        "extra_urls": item.get("extra_urls"),
++        "aggregator": item.get("aggregator"),
++        "author_role": item.get("author_role"),
++        "official": item.get("official"),
++        "first_party": item.get("first_party"),
++    }
++    return apply_send_gate(str(item.get("body") or ""), item.get("photo"), meta)
++
++
++def media_log(decision: dict | None) -> dict:
++    decision = decision or {}
++    url = decision.get("url")
++    logged_url = sanitize_source_url(url) if str(url or "").startswith("http") else (str(url) if url else None)
++    rejected = []
++    for row in decision.get("rejected") or []:
++        ru = row.get("url")
++        rejected.append({
++            "url": sanitize_source_url(ru) if str(ru or "").startswith("http") else ru,
++            "kind": row.get("kind"),
++            "reason": row.get("reason"),
++        })
++    return {"url": logged_url, "provenance": decision.get("provenance"), "approved": bool(decision.get("approved")),
++            "preview": False, "rejected": rejected}
+--- /dev/null
++++ b/app/quality/x_own.py
+@@ -0,0 +1,235 @@
++"""English original posts for @cblabx.
++
++This module drafts text. It does not call the X API, read cookies, sign XHunt,
++or drive a browser. The existing Chrome extension executor stays outside this file;
++publish() always refuses so tests and imports cannot post.
++"""
++from __future__ import annotations
++
++import re
++
++from .tg_news import assess_newsworthiness, story_keys, duplicate_reason, sanitize_source_url
++
++ACCOUNT = "@cblabx"
++X_API_ENABLED = False
++
++
++class OwnContentPublishBlocked(RuntimeError):
++    """Raised for every publish attempt. The X API lane stays off."""
++
++
++def publish(*_args, **_kwargs):
++    raise OwnContentPublishBlocked(
++        "X API is off. This module does not publish, and it does not call the Chrome extension."
++    )
++
++
++_OPINION_RE = re.compile(
++    r"\b(?:i think|i believe|in my opinion|in my view|game[- ]changer|bullish|bearish|must[- ]use)\b|"
++    r"\b(?:i|we)\s+(?:tried|tested|used)\b|in my testing|개인적으로",
++    re.I,
++)
++_QT_RE = re.compile(r"^\s*(?:qt\b|q/?t\b|quote tweet\b|translation\b|번역)", re.I)
++_FUNC = {
++    "a", "an", "the", "of", "to", "and", "or", "for", "from", "with", "on", "in", "that", "this",
++    "it", "is", "are", "was", "were", "be", "as", "by", "at", "into", "over", "after", "before",
++    "not", "no", "but", "if", "than", "then", "so", "you", "your", "our", "their", "can", "now",
++    "because", "users", "user", "what", "when", "who", "how", "new", "just", "like", "about",
++    "that", "matters", "matter", "important", "useful", "means", "change", "changed", "lets",
++    "let", "able", "without", "same", "asking", "reader", "readers", "from", "they", "them",
++    "its", "it's", "per", "via", "than", "also", "more", "most", "any", "all", "one", "out",
++}
++
++
++def _period(text: str) -> str:
++    text = re.sub(r"\s+", " ", str(text or "").strip())
++    if not text:
++        return ""
++    return text if text.endswith((".", "!", "?")) else text + "."
++
++
++def _content_tokens(text: str) -> set[str]:
++    out = set(re.findall(r"\d[\d.,]*%?", text or ""))
++    for word in re.findall(r"[A-Za-z][A-Za-z0-9.+-]{2,}", text or ""):
++        low = word.lower().strip(".")
++        if low in _FUNC:
++            continue
++        if word[0].isupper() or any(ch.isdigit() for ch in word) or len(low) >= 5:
++            out.add(low)
++    return out
++
++
++def _grounded(statement: str, source: str) -> list[str]:
++    src = (source or "").lower()
++    missing = []
++    for token in sorted(_content_tokens(statement)):
++        bare = token[1:] if token.startswith("$") else token
++        if token in src or bare in src or bare.rstrip("s") in src:
++            continue
++        missing.append(token)
++    return missing
++
++
++def resolve_cap(config: dict | None) -> tuple[int | None, str | None]:
++    """Return (cap, reason). A missing ramp day is unknown, not day zero."""
++    if not config:
++        return None, "cap config not attached"
++    ramp = config.get("ramp")
++    if isinstance(ramp, dict) and ramp.get("steps"):
++        steps = list(ramp.get("steps") or [])
++        idx = ramp.get("day_index")
++        if idx is None:
++            return None, "ramp day index unknown; not assumed to be day 0"
++        if not isinstance(idx, int) or isinstance(idx, bool) or idx < 0 or not steps:
++            return None, "ramp day index invalid"
++        try:
++            return int(steps[min(idx, len(steps) - 1)]), None
++        except (TypeError, ValueError):
++            return None, "ramp step invalid"
++    if config.get("daily_cap") is None:
++        return None, "daily cap not in config"
++    try:
++        return int(config["daily_cap"]), None
++    except (TypeError, ValueError):
++        return None, "daily cap invalid"
++
++
++def _cap_state(config: dict | None, posted_today) -> dict:
++    cap, reason = resolve_cap(config)
++    if cap is None:
++        return {"enforced": False, "allowed": None, "cap": None, "posted_today": posted_today
++                if posted_today is not None else None, "reason": reason}
++    if posted_today is None:
++        return {"enforced": False, "allowed": None, "cap": cap, "posted_today": None,
++                "reason": "posted_today unknown; not assumed 0"}
++    try:
++        posted = int(posted_today)
++    except (TypeError, ValueError):
++        return {"enforced": False, "allowed": None, "cap": cap, "posted_today": None,
++                "reason": "posted_today invalid; not assumed 0"}
++    return {"enforced": True, "allowed": posted < cap, "cap": cap, "posted_today": posted, "reason": None}
++
++
++def draft_own_post(item: dict | None, *, seen: list[dict] | None = None, config: dict | None = None,
++                   posted_today=None) -> dict:
++    """Grounded English what-changed + why-it-matters. Not a quote-tweet and not a translation dump."""
++    item = dict(item or {})
++    source = str(item.get("source_text") or "")
++    change = str(item.get("what_changed") or "").strip()
++    why = str(item.get("why_it_matters") or "").strip()
++    reasons = []
++    if not source.strip():
++        reasons.append("missing_primary_source")
++    if not change or not why:
++        reasons.append("missing_change_or_importance")
++    if change and why and re.sub(r"\W+", "", change.lower()) == re.sub(r"\W+", "", why.lower()):
++        reasons.append("why_repeats_change")
++    if _QT_RE.search(change) or _QT_RE.search(why) or str(item.get("mode") or item.get("kind") or "") in {"qt", "translation", "quote"}:
++        reasons.append("not_original")
++    if _OPINION_RE.search(change) or _OPINION_RE.search(why):
++        reasons.append("invented_opinion_or_personal_testing")
++    if source and change:
++        missing = _grounded(change, source)
++        if missing:
++            reasons.append("change_not_in_source")
++    if source and why:
++        missing = _grounded(why, source)
++        if missing:
++            reasons.append("why_not_grounded")
++    urls = [u for u in (item.get("primary_urls") or []) if sanitize_source_url(u)]
++    if item.get("primary_urls") and not urls:
++        reasons.append("primary_url_not_public_https")
++    news_item = {
++        "source_text": source,
++        "url": (urls or [None])[0],
++        "extra_urls": urls,
++        "author": item.get("author"),
++        "author_role": item.get("author_role"),
++        "aggregator": item.get("aggregator"),
++        "classification": item.get("classification"),
++        "kind": item.get("news_kind") or item.get("kind") if item.get("kind") in {"useful_case", "news", "product_update"} else None,
++        "official": item.get("official"),
++        "first_party": item.get("first_party"),
++        "quoted_text": item.get("quoted_text"),
++        "lane": "own_content",
++    }
++    verdict = assess_newsworthiness(news_item)
++    if not verdict["allow"]:
++        reasons.append(verdict["reason"] or "not_newsworthy")
++    keys = story_keys({"source_text": source, "url": news_item.get("url"), "extra_urls": urls,
++                       "headline": change, "claim": source})
++    dup = duplicate_reason(keys, seen)
++    if dup:
++        reasons.append(dup)
++    cap = _cap_state(config, item.get("posted_today", posted_today))
++    text = None
++    if change and why and "not_original" not in reasons:
++        text = f"{_period(change)} {_period(why)}"
++    text_reasons = [r for r in reasons if r != cap.get("reason")]
++    ok = not text_reasons
++    if config is not None and config.get("enabled") is False:
++        reasons.append("lane_disabled")
++        ok = False
++        ready = False
++    elif config is None or config.get("enabled") is None:
++        ready = False
++    else:
++        ready = bool(ok and cap.get("allowed") is True)
++    return {
++        "ok": ok,
++        "text": text if ok else None,
++        "reasons": list(dict.fromkeys(reasons)),
++        "story_keys": keys,
++        "account": ACCOUNT,
++        "language": "en",
++        "x_api": "off",
++        "ready_for_executor": ready,
++        "cap": cap,
++        "verdict": verdict,
++        "handoff": None if not ok else {
++            "executor": "chrome_extension",
++            "invoked": False,
++            "x_api": False,
++            "cookies": False,
++            "browser": False,
++            "account": ACCOUNT,
++            "text": text,
++            "story_keys": keys,
++            "primary_urls": urls,
++        },
++    }
++
++
++def operational_status(config: dict | None = None, history: dict | None = None) -> dict:
++    """Truthful lane status. Missing history is null, not zero."""
++    cap, cap_reason = resolve_cap(config)
++    posted = None
++    if history is not None and history.get("posted_today") is not None:
++        try:
++            posted = int(history["posted_today"])
++        except (TypeError, ValueError):
++            posted = None
++    enabled = None if not config or "enabled" not in config else bool(config.get("enabled"))
++    missing = []
++    if config is None:
++        missing.append("live own-content config was not attached")
++    elif cap is None and cap_reason:
++        missing.append(cap_reason)
++    if history is None or history.get("posted_today") is None:
++        missing.append("posted_today was not attached and is not reported as 0")
++    missing.append("live Chrome extension executor was not in the provided snapshots")
++    return {
++        "available": False,
++        "account": ACCOUNT,
++        "lane": "own_content_en",
++        "language": "en",
++        "x_api": "off",
++        "executor": "chrome_extension",
++        "executor_loaded": False,
++        "enabled": enabled,
++        "daily_cap": cap,
++        "ramp": None if not config else config.get("ramp"),
++        "posted_today": posted,
++        "metrics": None,
++        "unavailable_reason": "; ".join(dict.fromkeys(missing)),
++    }
+--- /dev/null
++++ b/app/quality/msg_status.py
+@@ -0,0 +1,293 @@
++"""MSG hub summary and /api/tg_status builders.
++
++Unknown candidate, rejection, and queue history stays null. Partial rejection
++rows are returned separately and are not a pass rate. Private Telegram targets
++become the generic label, with no chat or message id.
++"""
++from __future__ import annotations
++
++from datetime import datetime, timedelta, timezone
++
++from .tg_news import (
++    enforcement_status,
++    public_telegram_url,
++    redact_channel,
++    sanitize_source_url,
++)
++from .x_own import operational_status
++
++KST = timezone(timedelta(hours=9))
++
++POLICY = {
++    "scope": "important_or_useful_news_and_practical_ai_cases",
++    "fame": "not_sufficient",
++    "aggregators": "discovery_only_verify_primary",
++    "dedup": "one_story_across_accounts_and_images",
++    "korean": "dry_da_headline_plus_distinct_why",
++    "media": "official_capture_or_verified_demo_else_text_preview_off",
++    "invention": "no_invented_ai_context_or_firsthand_use",
++}
++
++# Confirmed from the public source posts. fix_status stays prepared until the
++# sender process attests that this code is what it is running.
++KNOWN_QUALITY_ISSUES = [
++    {
++        "post_url": "https://t.me/cblaboratory/795",
++        "source_url": "https://x.com/Muse/status/2118411960337289583",
++        "findings": [
++            "Source attachment is a video, not a photo.",
++            "Sender would select the video thumbnail URL (amplify_video_thumb) after text was accepted.",
++            "That frame is a racetrack paddock scene, unrelated to the Voice/cooking text.",
++            "The selected media URL was not retained, so provenance was unknown.",
++        ],
++        "certainty": "confirmed",
++        "fix_status": "prepared",
++        "lane": None,
++    },
++    {
++        "post_url": "https://t.me/cblaboratory/796",
++        "source_url": "https://x.com/thsottiaux/status/2118938956301779171",
++        "findings": [
++            "Source text is the joke 'Get me out of the basement' plus a poteto.com game link.",
++            "Quoted text is 'It's Friday'.",
++            "No AI-made game and no OpenAI product update is in the source.",
++            "openai:update/agent/top_tier treats author/employer fame as if it were news.",
++        ],
++        "certainty": "confirmed",
++        "fix_status": "prepared",
++        "lane": None,
++    },
++]
++
++
++def _as_of(snapshot: dict) -> str | None:
++    if snapshot.get("as_of"):
++        return str(snapshot["as_of"])
++    return None
++
++
++def _issue_fix_status(enforcement: str) -> str:
++    if enforcement == "live":
++        return "live"
++    if enforcement == "testing":
++        return "testing"
++    return "prepared"
++
++
++def _quality_issues(enforcement: str) -> list[dict]:
++    status = _issue_fix_status(enforcement)
++    out = []
++    for issue in KNOWN_QUALITY_ISSUES:
++        post = public_telegram_url(issue["post_url"])
++        source = sanitize_source_url(issue["source_url"])
++        out.append({
++            "post_url": post,
++            "findings": list(issue["findings"]),
++            "certainty": issue["certainty"],
++            "fix_status": status,
++            "lane": issue.get("lane"),
++            "source_url": source,
++        })
++    return out
++
++
++def _redact_recent(rows: list[dict] | None) -> list[dict] | None:
++    if rows is None:
++        return None
++    out = []
++    for row in rows:
++        channel = redact_channel(row.get("channel"))
++        tg = public_telegram_url(row.get("telegram_url"))
++        if channel == "private group":
++            tg = None
++        item = {
++            "at": row.get("at"),
++            "channel": channel,
++            "lane": row.get("lane"),
++            "ok": row.get("ok"),
++            "telegram_url": tg,
++            "source_url": sanitize_source_url(row.get("source_url") or row.get("url")),
++        }
++        if row.get("headline"):
++            headline = str(row["headline"])
++            headline = headline.replace(str(row.get("telegram_url") or ""), "")
++            item["headline"] = headline.strip()
++        out.append(item)
++    return out
++
++
++def _channel_lane_rows(events: list[dict] | None, *, failures_known: bool) -> list[dict] | None:
++    if events is None:
++        return None
++    grouped: dict[tuple[str, str], dict] = {}
++    for ev in events:
++        channel = redact_channel(ev.get("channel")) or ""
++        lane = str(ev.get("lane") or "")
++        slot = grouped.setdefault((channel, lane), {
++            "channel": channel, "lane": lane, "attempts": 0, "success": 0,
++            "failure": 0 if failures_known else None,
++            "last_success_at": None, "last_failure_at": None,
++        })
++        slot["attempts"] += 1
++        if ev.get("ok"):
++            slot["success"] += 1
++            slot["last_success_at"] = ev.get("at")
++        elif failures_known:
++            slot["failure"] += 1
++            slot["last_failure_at"] = ev.get("at")
++        else:
++            slot["failure"] = None
++    return list(grouped.values())
++
++
++def _pass_rate(candidates, rejected) -> tuple[float | None, str | None]:
++    if candidates is None or rejected is None:
++        return None, "candidate or rejection history was not attached"
++    try:
++        cand = int(candidates)
++        rej = int(rejected)
++    except (TypeError, ValueError):
++        return None, "candidate or rejection history was not numeric"
++    if cand <= 0 or rej < 0 or rej > cand:
++        return None, "candidate history cannot produce a rate"
++    return (cand - rej) / cand, None
++
++
++def build_telegram_section(snapshot: dict | None = None) -> dict:
++    snap = dict(snapshot or {})
++    enforcement = snap.get("policy_enforcement_status") or enforcement_status()
++    if enforcement not in {"not_applied", "prepared", "testing", "live"}:
++        enforcement = "not_applied"
++    events = snap.get("sent_events")
++    failures_known = bool(snap.get("failures_known"))
++    sourcing_in = snap.get("sourcing") if isinstance(snap.get("sourcing"), dict) else None
++    if sourcing_in and sourcing_in.get("candidates") is not None and sourcing_in.get("rejected") is not None:
++        rate, rate_reason = _pass_rate(sourcing_in.get("candidates"), sourcing_in.get("rejected"))
++        sourcing = {
++            "candidates": sourcing_in.get("candidates"),
++            "rejected": sourcing_in.get("rejected"),
++            "pass_rate": rate,
++            "unavailable_reason": rate_reason,
++        }
++    else:
++        sourcing = {
++            "candidates": None,
++            "rejected": None,
++            "pass_rate": None,
++            "unavailable_reason": "candidate and rejection history was not in the attached snapshot",
++        }
++    if snap.get("rejection_log_complete") and isinstance(snap.get("rejections"), list):
++        observed = snap.get("rejections")
++        partial = None
++    else:
++        observed = None
++        partial = snap.get("partial_rejections") if isinstance(snap.get("partial_rejections"), list) else None
++    pending = snap.get("pending") if isinstance(snap.get("pending"), dict) else None
++    if pending and pending.get("count") is not None:
++        pending_out = {"count": pending.get("count"), "source": pending.get("source") or "attached_queue"}
++    else:
++        pending_out = {"count": None, "source": None}
++    coverage = {
++        "sent_log": "complete" if events is not None and failures_known else ("partial" if events is not None else "missing"),
++        "candidate_history": "complete" if sourcing["pass_rate"] is not None else "missing",
++        "rejection_history": "complete" if observed is not None else ("partial" if partial else "missing"),
++        "notes": [],
++    }
++    if events is None:
++        coverage["notes"].append("sent log was not attached; today counts are null, not zero")
++    elif not failures_known:
++        coverage["notes"].append("failure counts are null because the attached log does not include failures")
++    if sourcing["pass_rate"] is None:
++        coverage["notes"].append(sourcing["unavailable_reason"])
++    if pending_out["count"] is None:
++        coverage["notes"].append("pending queue was not attached")
++    if partial:
++        coverage["notes"].append("partial rejection rows are labeled separately and are not a pass rate")
++    today_rows = _channel_lane_rows(events, failures_known=failures_known)
++    return {
++        "as_of": _as_of(snap),
++        "timezone": "Asia/Seoul",
++        "policy": POLICY,
++        "policy_enforcement_status": enforcement,
++        "today": {
++            "by_channel_lane": today_rows,
++            "unavailable_reason": None if today_rows is not None else "sent log was not attached",
++        },
++        "pending": pending_out,
++        "sourcing": sourcing,
++        "observed_rejections": observed,
++        "partial_rejections": [
++            {"reason": row.get("reason"), "count": row.get("count"), "coverage": "partial"}
++            for row in (partial or [])
++        ] if partial else None,
++        "recent": _redact_recent(snap.get("recent") if "recent" in snap else events),
++        "quality_issues": _quality_issues(enforcement),
++        "coverage": coverage,
++    }
++
++
++def build_tg_status(snapshot: dict | None = None) -> dict:
++    """Match the live shape: today_by_channel values are lane lists, not counts."""
++    snap = dict(snapshot or {})
++    events = snap.get("sent_events")
++    today_by_channel = None
++    today_by_lane = None
++    if events is not None:
++        today_by_channel = {}
++        today_by_lane = {}
++        for ev in events:
++            if ev.get("ok") is False:
++                continue
++            channel = redact_channel(ev.get("channel")) or ""
++            lane = str(ev.get("lane") or "")
++            today_by_channel.setdefault(channel, []).append(lane)
++            today_by_lane.setdefault(lane, []).append(channel)
++    recent = _redact_recent(snap.get("recent")) if "recent" in snap else _redact_recent(events[-8:] if events else None)
++    binance = snap.get("binance_ann", None)
++    if isinstance(binance, list):
++        cleaned = []
++        for row in binance:
++            if isinstance(row, str):
++                cleaned.append(sanitize_source_url(row) or None)
++            elif isinstance(row, dict):
++                cleaned.append({k: (sanitize_source_url(v) if k.endswith("url") else v) for k, v in row.items()
++                                if "token" not in k.lower() and "secret" not in k.lower()})
++        binance_out = [x for x in cleaned if x]
++    else:
++        binance_out = None
++    enabled = snap.get("enabled", None)
++    if enabled is not None:
++        enabled = bool(enabled)
++    return {
++        "enabled": enabled,
++        "today_by_channel": today_by_channel,
++        "today_by_lane": today_by_lane,
++        "recent": recent,
++        "binance_ann": binance_out,
++        "binance_ann_unavailable_reason": None if binance_out is not None else "binance announcement source was not attached",
++    }
++
++
++def build_hub_summary(snapshot: dict | None = None) -> dict:
++    snap = dict(snapshot or {})
++    now = datetime.now(KST).isoformat(timespec="seconds")
++    telegram_in = dict(snap.get("telegram") or {})
++    if "as_of" not in telegram_in:
++        telegram_in["as_of"] = snap.get("as_of") or now
++    own = snap.get("own_content")
++    if isinstance(own, dict) and ("config" in own or "history" in own):
++        own_status = operational_status(own.get("config"), own.get("history"))
++    else:
++        own_status = operational_status(None, None)
++    return {"telegram": build_telegram_section(telegram_in), "own_content": own_status}
++
++
++def response_leaks_private(payload) -> list[str]:
++    """Test helper: private ids and credential fragments that must not appear."""
++    import json
++    text = json.dumps(payload, ensure_ascii=False)
++    hits = []
++    for needle in ("t.me/c/", "joinchat", "token=", "password=", "access_token"):
++        if needle in text:
++            hits.append(needle)
++    return hits
+--- /dev/null
++++ b/app/routers/msg_status.py
+@@ -0,0 +1,32 @@
++"""Read-only status routes for the yapping-bot API.
++
++The default snapshot is empty on purpose. Production must pass its own sent log,
++queue, and enforcement attestation after the live router file is snapshotted.
++This module does not read credentials and does not post.
++"""
++from __future__ import annotations
++
++from typing import Callable, Optional
++
++from fastapi import APIRouter
++
++from app.quality.msg_status import build_hub_summary, build_tg_status
++
++router = APIRouter(prefix="/api", tags=["status"])
++
++_provider: Callable[[], dict] = lambda: {}
++
++
++def set_snapshot_provider(provider: Optional[Callable[[], dict]]) -> None:
++    global _provider
++    _provider = provider or (lambda: {})
++
++
++@router.get("/hub_summary")
++def hub_summary() -> dict:
++    return build_hub_summary(_provider())
++
++
++@router.get("/tg_status")
++def tg_status() -> dict:
++    return build_tg_status(_provider())
